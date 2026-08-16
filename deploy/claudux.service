@@ -1,0 +1,36 @@
+# deploy/claudux.service
+#
+# Optional - only for continuous operation (restart on crash, autostart on
+# boot). For the simple case, "npm start" in the foreground is enough.
+#
+# Install: copy to /etc/systemd/system/claudux.service, adjust the paths and
+# the user below, then:
+#   systemctl daemon-reload && systemctl enable --now claudux
+#
+# Anyone who reaches the port gets a shell as this user (see README's
+# Security section) - hence User=, and hence not root. User= is also what
+# makes systemd set HOME at all; without it the account and notification
+# files land relative to WorkingDirectory, i.e. inside the checkout.
+
+[Unit]
+Description=Claudux
+After=network.target
+
+[Service]
+User=claudux
+Group=claudux
+WorkingDirectory=/opt/claudux
+# Leading "-": without it, systemd refuses to start when .env is absent and
+# points at the file instead of at the missing `npm run setup`.
+EnvironmentFile=-/opt/claudux/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+# KillMode=process: on stop/restart, systemd kills ONLY the tracked main
+# Node process, not the whole cgroup. tmuxManager.spawnTmux() starts the
+# tmux servers detached and unref'd on purpose so they outlive the Node
+# process - the systemd default KillMode=control-group would kill them
+# anyway, because they stay members of the same cgroup.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

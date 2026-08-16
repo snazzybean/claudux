@@ -1,0 +1,42 @@
+// These lookups run as an ES module and therefore after the document has
+// been parsed - the nodes are guaranteed to exist by the time they run.
+export const appEl = document.getElementById('app');
+export const projectListEl = document.getElementById('projectList');
+export const terminalFrameEl = document.getElementById('terminalFrame');
+export const errorBannerEl = document.getElementById('errorBanner');
+export const errorBannerTextEl = document.getElementById('errorBannerText');
+export const errorBannerCloseEl = document.getElementById('errorBannerClose');
+export const searchInputEl = document.getElementById('searchInput');
+export const accountsListEl = document.getElementById('accountsList');
+export const accountBadgeEl = document.getElementById('accountBadge');
+export const usagePopoverEl = document.getElementById('usagePopover');
+export const usageBackdropEl = document.getElementById('usageBackdrop');
+export const filesPanelEl = document.getElementById('filesPanel');
+export const keybarEl = document.getElementById('keybar');
+export const keybarMoreBtnEl = document.getElementById('keybarMoreBtn');
+export const copySelectionBtnEl = document.getElementById('copySelectionBtn');
+export const copyTextPanelEl = document.getElementById('copyTextPanel');
+export const copyMenuEl = document.getElementById('copyMenu');
+export const copyMenuViewEl = document.getElementById('copyMenuView');
+export const copyMenuAllEl = document.getElementById('copyMenuAll');
+export const copyMenuVersionEl = document.getElementById('copyMenuVersion');
+export const copyMenuCloseEl = document.getElementById('copyMenuClose');
+export const copyMenuStatusEl = document.getElementById('copyMenuStatus');
+export const tabTerminalEl = document.getElementById('tabTerminal');
+export const tabFilesEl = document.getElementById('tabFiles');
+export const themeToggleEl = document.getElementById('themeToggle');
+export const paletteListEl = document.getElementById('paletteList');
+export const termBellListEl = document.getElementById('termBellList');
+export const termBorderToggleEl = document.getElementById('termBorderToggle');
+export const backBtnEl = document.getElementById('backBtn');
+export const overlayGroupEl = document.getElementById('overlayGroup');
+export const overlayMenuBtnEl = document.getElementById('overlayMenuBtn');
+export const overlayMenuEl = document.getElementById('overlayMenu');
+export const overlayMenuReleaseEl = document.getElementById('overlayMenuRelease');
+export const overlayMenuTextEl = document.getElementById('overlayMenuText');
+export const toastEl = document.getElementById('toast');
+export const sidebarToggleEl = document.getElementById('sidebarToggle');
+export const sidebarRailEl = document.getElementById('sidebarRail');
+export const authBannerEl = document.getElementById('authBanner');
+export const focusHolderEl = document.getElementById('focusHolder');
+

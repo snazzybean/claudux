@@ -1,0 +1,48 @@
+{
+  "name": "claudux",
+  "version": "0.1.0",
+  "description": "Web interface for running Claude Code sessions from a browser, phone included - tmux keeps the sessions alive, ttyd brings them into the browser.",
+  "author": "snazzybean",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "tmux",
+    "ttyd",
+    "terminal",
+    "mobile"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snazzybean/claudux.git"
+  },
+  "bugs": {
+    "url": "https://github.com/snazzybean/claudux/issues"
+  },
+  "homepage": "https://github.com/snazzybean/claudux#readme",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "test": "sh scripts/run-tests.sh",
+    "lint": "eslint .",
+    "setup": "node scripts/setup.js",
+    "prepare": "git config core.hooksPath .git-hooks || true"
+  },
+  "dependencies": {
+    "compression": "^1.8.1",
+    "esbuild": "^0.28.2",
+    "express": "^4.19.2",
+    "highlight.js": "^11.11.1",
+    "http-proxy-middleware": "^4.2.0",
+    "marked": "^18.0.9",
+    "marked-highlight": "^2.2.4"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0"
+  }
+}

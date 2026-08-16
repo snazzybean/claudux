@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Check for accidental token commits before push
+#
+# The OAUTH branch uses a PCRE negative lookahead so that a template-literal
+# interpolation right after the "=" (e.g. `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`)
+# is NOT treated as a literal secret value - it's source code substituting a
+# variable into an env string, not a leaked token. Requires `grep -P`.
+#
+# The lookahead also excludes a named allow-list of invented values that
+# follow the env var in test fixtures and comments. The three sk-*\0 entries
+# are excluded only WITH the escaped NUL that ends an environ entry, so the
+# hole is the fixture line and not the bare name. Test files are NOT
+# pathspec-excluded: a real sk-ant-... token in a test is still caught by
+# the context-independent alternation. A new placeholder must be added here
+# deliberately.
+#
+# The env-var name is held in its own variable and concatenated into PATTERN
+# below (rather than written inline) so that this hook's own source never
+# contains the literal substring "CLAUDE_CODE_OAUTH_TOKEN=" immediately
+# followed by 10+ non-space characters - otherwise a future edit to this
+# very PATTERN definition would trip its own check and block its own commit.
+OAUTH_VAR='CLAUDE_CODE_OAUTH_TOKEN'
+
+# The added-line filter is part of the pattern instead of two greps piped in
+# front of it, so that exactly ONE command decides the outcome: the exit
+# status of a pipeline cannot tell "no match" from "grep never ran", and
+# under pipefail it reports git's or xargs' status instead of grep's - a
+# real match then comes back as a clean result.
+#
+# `^\+` with a lookahead that drops the `+++ b/file` header while keeping an
+# added line whose own content starts with a "+".
+ADDED_LINE='^\+(?!\+\+)'
+PATTERN="$ADDED_LINE"'.*(sk-ant-[A-Za-z0-9_-]{20,}|'"$OAUTH_VAR"'=(?!\$\{|sk-test-token|undefined|sk-nope\\0|sk-known\\0|sk-other\\0)[^ ]{10,})'
+
+# No pathspec exclusions: docs are exactly where a token gets pasted into an
+# example. (An empty bash array can't stand in here - under `set -u`,
+# expanding one is an error in bash 3.2, which macOS ships.)
+
+# -P is not optional: without PCRE the lookaheads above are a syntax error,
+# and grep answers every call with exit 2. macOS' system grep has no -P at
+# all, so the hook has to find a grep that does or refuse to run - a check
+# that cannot run must not look like a clean result.
+GREP=grep
+if ! echo x | "$GREP" -qP 'x' 2>/dev/null; then
+  if command -v ggrep >/dev/null 2>&1 && echo x | ggrep -qP 'x' 2>/dev/null; then
+    GREP=ggrep
+  else
+    echo "❌ Push aborted: this grep has no -P (PCRE) support, so the token check cannot run." >&2
+    echo "   Install GNU grep (on macOS: brew install grep) and push again." >&2
+    exit 1
+  fi
+fi
+
+# Aborts on a match and on everything that is not a clean "nothing found":
+# grep answers 0 for a hit, 1 for no hit and 2 for "I failed", and only the
+# 1 is a reason to let the push through. The commits are read one at a time
+# so the message can name the one that carries the finding.
+scan_commits() {
+  local revs sha out hits status
+  revs=$(git rev-list "$@" 2>/dev/null) || {
+    echo "❌ Push aborted: could not list the commits to check ($*)." >&2
+    exit 1
+  }
+  for sha in $revs; do
+    out=$(git show "$sha" 2>/dev/null) || {
+      echo "❌ Push aborted: could not read commit $sha." >&2
+      exit 1
+    }
+    # Here-string, not a pipe: a pipeline would put grep's status back out
+    # of reach, which is the whole point of this rewrite.
+    set +e
+    hits=$("$GREP" -aP "$PATTERN" <<<"$out")
+    status=$?
+    set -e
+    case "$status" in
+      0)
+        echo "❌ Push aborted: possible token found in commit $sha." >&2
+        printf '%s\n' "$hits" >&2
+        exit 1
+        ;;
+      1) ;;
+      *)
+        echo "❌ Push aborted: the token check itself failed on commit $sha (grep exit $status)." >&2
+        exit 1
+        ;;
+    esac
+  done
+}
+
+# Read stdin to get push information
+# Format: <local-ref> <local-sha> <remote-ref> <remote-sha>
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
+    # Existing branch - only the commits this push adds. Added lines only,
+    # so removing a leaked token is never itself flagged as introducing one.
+    scan_commits "$remote_sha..$local_sha"
+  else
+    # New branch on the remote - nothing to diff against, so every commit no
+    # remote has yet. This is the first push of a fresh repository, the one
+    # push that publishes everything at once.
+    scan_commits "$local_sha" --not --remotes
+  fi
+done
+
+exit 0

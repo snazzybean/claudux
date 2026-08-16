@@ -1,0 +1,3449 @@
+/* The "bluegray" palette below is the default; every other palette
+ * overrides its tokens.
+ */
+:root {
+  --font-ui: "IBM Plex Sans", ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --dur: 140ms;
+
+  /* ---------- Size scale ----------
+     Three steps per axis, named after what they're for rather than how big
+     they are - the question a new element raises is "what is this", not
+     "which number". Both scales are read off what the file already does
+     most often, so anything adopting them keeps its current size.
+
+     The existing sizes in between (12px and 13px text, 8px and 10px
+     corners) stay where they are. They cover about thirty places, the
+     difference to the neighboring step is invisible, and nothing here has
+     a test that would catch a mistake while converting them. New code
+     takes a step from the scale; anything already written moves over only
+     when it's being touched anyway. */
+  --fs-meta: 11px;  /* timestamps, hints, counters */
+  --fs-ui: 12.5px;  /* labels on controls - the default */
+  --fs-body: 14px;  /* running text, project names */
+
+  --r-sm: 6px;      /* inside another control */
+  --r-md: 9px;      /* controls and cards - the default */
+  --r-lg: 12px;     /* windows and overlays */
+  --r-pill: 999px;
+
+  /* Border around the terminal, the buttons on it, AND the terminal's own
+     background: CSS can't reach the latter, JS passes the same value in via
+     ttyd's theme option (see js/terminal.js). Keeping the two in sync is
+     the point - previously ttyd's own gray showed in the terminal while a
+     different tone sat in the border around it, visible whenever no
+     terminal was loaded yet.
+
+     The default is ttyd's own values: anyone who hasn't set anything should
+     see the terminal the way the console draws it by default. The
+     alternatives are further down. */
+  --term-bg: #2b2b2b;
+  --term-fg: #d2d2d2;
+  --term-border: #3a3a3a;
+
+  /* Height of the floating bar above the terminal (.overlay-group), so
+     .files-panel and .copy-text-panel begin below it. Summed from the bar's
+     own rules, not measured - whoever changes one of them updates this
+     number too:
+       .mode-switch button: fixed height 26px (border-box)
+       .mode-switch:        + padding 2px+2px + border 1px+1px = 32px
+       .overlay-group:      + padding 2px+2px + border 1px+1px = 38px
+     .overlay-btn takes it as both height and width, so the two bars can't
+     drift apart. */
+  --overlay-height: 38px;
+
+  /* ---------- Soft elevation on the session list cards ----------
+     A tight contact shadow plus a softer, wider-reaching second layer -
+     reads as more physical than a single shadow, without claiming a light
+     edge the surface behind it can't actually cast. Fixed black values
+     instead of palette tokens: shadow is shadow, regardless of the palette.
+
+     Kept as variables because `box-shadow` on the same card also carries
+     the active-state ring, and the layers would otherwise have to be
+     repeated there. An `outline` would have been the alternative, but it
+     would displace the global focus ring. */
+  --glass-card:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 4px 14px rgba(0, 0, 0, 0.22);
+  /* The project card holds back - it's the surface UNDER the chats, not one
+     of them itself. In exchange it carries the wider shadow, at lower
+     opacity than the cards resting on it. */
+  --glass-surface:
+    0 1px 2px rgba(0, 0, 0, 0.14),
+    0 3px 12px rgba(0, 0, 0, 0.16);
+  /* Controls: a single shadow layer - at a height of 26 to 44px, a second,
+     wider layer would just blur into the first without adding depth. */
+  --glass-button:
+    0 1px 2px rgba(0, 0, 0, 0.20);
+  /* Whatever sits above everything else - windows, menus, messages. The
+     wide shadow creates the sense of distance from the page, not the color:
+     these surfaces have to stand out even when they carry the same fill as
+     their background. */
+  --glass-floating:
+    0 10px 28px rgba(0, 0, 0, 0.38);
+}
+
+/* ---------- Color palettes ----------
+   Each palette defines BOTH directions at once, as --p-light-* and
+   --p-dark-*. Which of the two sets applies is decided by the four
+   assignment blocks below. Without this split, each palette would need
+   four blocks of its own (default, system-dark, chosen-light, chosen-dark)
+   - with eight palettes that's thirty-two instead of eight.
+
+   The default additionally hangs off bare :root, so that nothing is
+   missing when no choice has been saved. A set data-palette wins via
+   higher specificity. */
+
+/* Default: cool blue-gray, light background cream-colored. */
+:root,
+:root[data-palette="bluegray"],
+.palette-item[data-palette="bluegray"] {
+  --p-light-bg: #f6f3ec;
+  --p-light-surface: #ffffff;
+  --p-light-surface-2: #eee9dc;
+  --p-light-surface-hover: #f1ecdf;
+  --p-light-border: #ddd5c0;
+  --p-light-text: #22242b;
+  --p-light-text-muted: #74726a;
+  --p-light-accent: #b3701a;
+  --p-light-accent-strong: #8f5913;
+  --p-light-accent-soft: rgba(179, 112, 26, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #b3701a;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #12151b;
+  --p-dark-surface: #1a1e26;
+  --p-dark-surface-2: #212630;
+  --p-dark-surface-hover: #252b36;
+  --p-dark-border: #2b313d;
+  --p-dark-text: #e7e4dc;
+  --p-dark-text-muted: #8a90a0;
+  --p-dark-accent: #d99a3f;
+  --p-dark-accent-strong: #f0b25c;
+  --p-dark-accent-soft: rgba(217, 154, 63, 0.16);
+  --p-dark-live: #5fb87a;
+  --p-dark-live-soft: rgba(95, 184, 122, 0.16);
+  --p-dark-focus: #d99a3f;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* The same look without a blue tint - the grays lean warm. */
+:root[data-palette="warmgray"],
+.palette-item[data-palette="warmgray"] {
+  --p-light-bg: #f7f3ea;
+  --p-light-surface: #fffdf8;
+  --p-light-surface-2: #efe9dc;
+  --p-light-surface-hover: #f3eee2;
+  --p-light-border: #ddd4c2;
+  --p-light-text: #262320;
+  --p-light-text-muted: #756e63;
+  --p-light-accent: #b3701a;
+  --p-light-accent-strong: #8f5913;
+  --p-light-accent-soft: rgba(179, 112, 26, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #b3701a;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #1a1815;
+  --p-dark-surface: #232019;
+  --p-dark-surface-2: #2a261e;
+  --p-dark-surface-hover: #302b22;
+  --p-dark-border: #3a342a;
+  --p-dark-text: #ebe6dc;
+  --p-dark-text-muted: #9a9184;
+  --p-dark-accent: #d99a3f;
+  --p-dark-accent-strong: #f0b25c;
+  --p-dark-accent-soft: rgba(217, 154, 63, 0.16);
+  --p-dark-live: #6fb872;
+  --p-dark-live-soft: rgba(111, 184, 114, 0.16);
+  --p-dark-focus: #d99a3f;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* Gray with no color tint at all, plus a cool blue accent. */
+:root[data-palette="neutral"],
+.palette-item[data-palette="neutral"] {
+  --p-light-bg: #f4f4f4;
+  --p-light-surface: #ffffff;
+  --p-light-surface-2: #ebebeb;
+  --p-light-surface-hover: #f0f0f0;
+  --p-light-border: #d6d6d6;
+  --p-light-text: #1f1f1f;
+  --p-light-text-muted: #6b6b6b;
+  --p-light-accent: #2f5fd0;
+  --p-light-accent-strong: #244aa8;
+  --p-light-accent-soft: rgba(47, 95, 208, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #2f5fd0;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #151515;
+  --p-dark-surface: #1e1e1e;
+  --p-dark-surface-2: #262626;
+  --p-dark-surface-hover: #2d2d2d;
+  --p-dark-border: #383838;
+  --p-dark-text: #e6e6e6;
+  --p-dark-text-muted: #949494;
+  --p-dark-accent: #7aa2f7;
+  --p-dark-accent-strong: #9db8ff;
+  --p-dark-accent-soft: rgba(122, 162, 247, 0.16);
+  --p-dark-live: #5fb87a;
+  --p-dark-live-soft: rgba(95, 184, 122, 0.16);
+  --p-dark-focus: #7aa2f7;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* Darker and higher-contrast than the rest; light background near-white. */
+:root[data-palette="charcoal"],
+.palette-item[data-palette="charcoal"] {
+  --p-light-bg: #fafafb;
+  --p-light-surface: #ffffff;
+  --p-light-surface-2: #f2f2f4;
+  --p-light-surface-hover: #ebebee;
+  --p-light-border: #d2d2d8;
+  --p-light-text: #101013;
+  --p-light-text-muted: #5f5f68;
+  --p-light-accent: #a9641a;
+  --p-light-accent-strong: #854d12;
+  --p-light-accent-soft: rgba(169, 100, 26, 0.12);
+  --p-light-live: #276b41;
+  --p-light-live-soft: rgba(39, 107, 65, 0.14);
+  --p-light-focus: #a9641a;
+  --p-light-danger: #a3231c;
+  --p-light-danger-soft: rgba(163, 35, 28, 0.12);
+
+  --p-dark-bg: #0b0b0c;
+  --p-dark-surface: #141416;
+  --p-dark-surface-2: #1c1c1f;
+  --p-dark-surface-hover: #232327;
+  --p-dark-border: #2e2e33;
+  --p-dark-text: #f2f2f3;
+  --p-dark-text-muted: #9b9ba3;
+  --p-dark-accent: #e0a458;
+  --p-dark-accent-strong: #f5bd74;
+  --p-dark-accent-soft: rgba(224, 164, 88, 0.16);
+  --p-dark-live: #5fb87a;
+  --p-dark-live-soft: rgba(95, 184, 122, 0.16);
+  --p-dark-focus: #e0a458;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* Green-gray surfaces, ochre accent. */
+:root[data-palette="moss"],
+.palette-item[data-palette="moss"] {
+  --p-light-bg: #f2f4ee;
+  --p-light-surface: #ffffff;
+  --p-light-surface-2: #e7ebe2;
+  --p-light-surface-hover: #edf0e8;
+  --p-light-border: #d2d9cc;
+  --p-light-text: #232720;
+  --p-light-text-muted: #6b7368;
+  --p-light-accent: #96701a;
+  --p-light-accent-strong: #765713;
+  --p-light-accent-soft: rgba(150, 112, 26, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #96701a;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #1a201b;
+  --p-dark-surface: #222a24;
+  --p-dark-surface-2: #29322b;
+  --p-dark-surface-hover: #303a32;
+  --p-dark-border: #3a453c;
+  --p-dark-text: #e4e8de;
+  --p-dark-text-muted: #8f9d8f;
+  --p-dark-accent: #d3a24a;
+  --p-dark-accent-strong: #ecbc66;
+  --p-dark-accent-soft: rgba(211, 162, 74, 0.16);
+  --p-dark-live: #7fc98a;
+  --p-dark-live-soft: rgba(127, 201, 138, 0.16);
+  --p-dark-focus: #d3a24a;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* Deep blue with a light-blue accent. */
+:root[data-palette="nightblue"],
+.palette-item[data-palette="nightblue"] {
+  --p-light-bg: #f2f5fb;
+  --p-light-surface: #ffffff;
+  --p-light-surface-2: #e8edf7;
+  --p-light-surface-hover: #eef2fa;
+  --p-light-border: #d0d9e9;
+  --p-light-text: #1c2233;
+  --p-light-text-muted: #666f85;
+  --p-light-accent: #1f6f9c;
+  --p-light-accent-strong: #175680;
+  --p-light-accent-soft: rgba(31, 111, 156, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #1f6f9c;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #10141f;
+  --p-dark-surface: #171d2b;
+  --p-dark-surface-2: #1d2536;
+  --p-dark-surface-hover: #232c40;
+  --p-dark-border: #2c3550;
+  --p-dark-text: #dfe4f0;
+  --p-dark-text-muted: #838ca6;
+  --p-dark-accent: #7dcfff;
+  --p-dark-accent-strong: #a5e0ff;
+  --p-dark-accent-soft: rgba(125, 207, 255, 0.16);
+  --p-dark-live: #5fb87a;
+  --p-dark-live-soft: rgba(95, 184, 122, 0.16);
+  --p-dark-focus: #7dcfff;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* Purple-gray surfaces, muted mauve as accent. */
+:root[data-palette="plum"],
+.palette-item[data-palette="plum"] {
+  --p-light-bg: #f6f3fa;
+  --p-light-surface: #ffffff;
+  --p-light-surface-2: #eee9f4;
+  --p-light-surface-hover: #f2eef8;
+  --p-light-border: #ded5e8;
+  --p-light-text: #241f2e;
+  --p-light-text-muted: #6e6680;
+  --p-light-accent: #7a4b9c;
+  --p-light-accent-strong: #5f3a7a;
+  --p-light-accent-soft: rgba(122, 75, 156, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #7a4b9c;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #171420;
+  --p-dark-surface: #1f1b2b;
+  --p-dark-surface-2: #262135;
+  --p-dark-surface-hover: #2d283e;
+  --p-dark-border: #383150;
+  --p-dark-text: #e6e0f0;
+  --p-dark-text-muted: #948aa8;
+  --p-dark-accent: #c69ae0;
+  --p-dark-accent-strong: #dcb8f0;
+  --p-dark-accent-soft: rgba(198, 154, 224, 0.16);
+  --p-dark-live: #5fb87a;
+  --p-dark-live-soft: rgba(95, 184, 122, 0.16);
+  --p-dark-focus: #c69ae0;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* The warmest of the palettes, terracotta as accent. */
+:root[data-palette="sand"],
+.palette-item[data-palette="sand"] {
+  --p-light-bg: #faf4e8;
+  --p-light-surface: #fffdf6;
+  --p-light-surface-2: #f1e8d6;
+  --p-light-surface-hover: #f6efe1;
+  --p-light-border: #e0d3ba;
+  --p-light-text: #2b241a;
+  --p-light-text-muted: #7a6c56;
+  --p-light-accent: #b25a1e;
+  --p-light-accent-strong: #8e4616;
+  --p-light-accent-soft: rgba(178, 90, 30, 0.12);
+  --p-light-live: #2f7a4c;
+  --p-light-live-soft: rgba(47, 122, 76, 0.14);
+  --p-light-focus: #b25a1e;
+  --p-light-danger: #b3261e;
+  --p-light-danger-soft: rgba(179, 38, 30, 0.12);
+
+  --p-dark-bg: #1f1b16;
+  --p-dark-surface: #29241d;
+  --p-dark-surface-2: #322c23;
+  --p-dark-surface-hover: #3a332a;
+  --p-dark-border: #453d31;
+  --p-dark-text: #efe6d6;
+  --p-dark-text-muted: #a4957e;
+  --p-dark-accent: #e08b52;
+  --p-dark-accent-strong: #f2a870;
+  --p-dark-accent-soft: rgba(224, 139, 82, 0.16);
+  --p-dark-live: #8fbf6a;
+  --p-dark-live-soft: rgba(143, 191, 106, 0.16);
+  --p-dark-focus: #e08b52;
+  --p-dark-danger: #e5877e;
+  --p-dark-danger-soft: rgba(229, 135, 126, 0.16);
+}
+
+/* ---------- Light or dark ----------
+   Three states as before: system preference via `prefers-color-scheme`,
+   plus a toggle that sets `data-theme` on <html> and remembers it in
+   localStorage. Source order carries the resolution: an explicit choice
+   is further down AND has higher specificity via the attribute, so it
+   wins against the media query. */
+:root {
+  --bg: var(--p-light-bg);
+  --surface: var(--p-light-surface);
+  --surface-2: var(--p-light-surface-2);
+  --surface-hover: var(--p-light-surface-hover);
+  --border: var(--p-light-border);
+  --text: var(--p-light-text);
+  --text-muted: var(--p-light-text-muted);
+  --accent: var(--p-light-accent);
+  --accent-strong: var(--p-light-accent-strong);
+  --accent-soft: var(--p-light-accent-soft);
+  --live: var(--p-light-live);
+  --live-soft: var(--p-light-live-soft);
+  --focus: var(--p-light-focus);
+  --danger: var(--p-light-danger);
+  --danger-soft: var(--p-light-danger-soft);
+  /* "Waiting for you" on the session dot. The one tone that is NOT taken
+     from the palette: --accent varies per palette and leans green under
+     "moss", where it would be indistinguishable from the working dot -
+     the very difference this colour exists to make. The value is the blue
+     the "neutral" palette already uses, so it stays inside the design's
+     vocabulary instead of introducing a ninth hue. */
+  --waiting: #2f5fd0;
+  /* Text on an accent-colored surface. Not part of the palettes, because
+     the answer follows the direction rather than the hue: every light
+     accent is mid-dark and carries white, every dark accent is bright and
+     carries the palette's own darkest surface. Two hardcoded values used to
+     stand here (near-black on .btn-accent, white on .file-btn.primary) -
+     each one failed contrast in the direction it wasn't chosen for.
+
+     bluegray and warmgray stay just under AA at rest: no value clears 4.5
+     against both their accent and its hover tone. Fixing that means
+     darkening --p-light-accent, which is a change to the palette. */
+  --on-accent: #ffffff;
+  /* One step past --text, away from --text-muted. Only the cone of light on
+     a working session's title uses it, and only because --text is the end
+     of the palette: a cone that peaks there can be no brighter than the
+     text it sweeps across. Derived here rather than in the palettes for the
+     same reason as --on-accent - which way is "further" depends on the
+     assignment, not on the hue. */
+  --text-bright: color-mix(in srgb, var(--p-light-text) 75%, #000);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--p-dark-bg);
+    --surface: var(--p-dark-surface);
+    --surface-2: var(--p-dark-surface-2);
+    --surface-hover: var(--p-dark-surface-hover);
+    --border: var(--p-dark-border);
+    --text: var(--p-dark-text);
+    --text-muted: var(--p-dark-text-muted);
+    --accent: var(--p-dark-accent);
+    --accent-strong: var(--p-dark-accent-strong);
+    --accent-soft: var(--p-dark-accent-soft);
+    --live: var(--p-dark-live);
+    --live-soft: var(--p-dark-live-soft);
+    --focus: var(--p-dark-focus);
+    --danger: var(--p-dark-danger);
+    --danger-soft: var(--p-dark-danger-soft);
+    --waiting: #7aa2f7;
+    --on-accent: var(--p-dark-bg);
+    --text-bright: color-mix(in srgb, var(--p-dark-text) 75%, #fff);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: var(--p-dark-bg);
+  --surface: var(--p-dark-surface);
+  --surface-2: var(--p-dark-surface-2);
+  --surface-hover: var(--p-dark-surface-hover);
+  --border: var(--p-dark-border);
+  --text: var(--p-dark-text);
+  --text-muted: var(--p-dark-text-muted);
+  --accent: var(--p-dark-accent);
+  --accent-strong: var(--p-dark-accent-strong);
+  --accent-soft: var(--p-dark-accent-soft);
+  --live: var(--p-dark-live);
+  --live-soft: var(--p-dark-live-soft);
+  --focus: var(--p-dark-focus);
+  --danger: var(--p-dark-danger);
+  --danger-soft: var(--p-dark-danger-soft);
+  --waiting: #7aa2f7;
+  --on-accent: var(--p-dark-bg);
+  --text-bright: color-mix(in srgb, var(--p-dark-text) 75%, #fff);
+}
+:root[data-theme="light"] {
+  --bg: var(--p-light-bg);
+  --surface: var(--p-light-surface);
+  --surface-2: var(--p-light-surface-2);
+  --surface-hover: var(--p-light-surface-hover);
+  --border: var(--p-light-border);
+  --text: var(--p-light-text);
+  --text-muted: var(--p-light-text-muted);
+  --accent: var(--p-light-accent);
+  --accent-strong: var(--p-light-accent-strong);
+  --accent-soft: var(--p-light-accent-soft);
+  --live: var(--p-light-live);
+  --live-soft: var(--p-light-live-soft);
+  --focus: var(--p-light-focus);
+  --danger: var(--p-light-danger);
+  --danger-soft: var(--p-light-danger-soft);
+  --waiting: #2f5fd0;
+  --on-accent: #ffffff;
+  --text-bright: color-mix(in srgb, var(--p-light-text) 75%, #000);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+* { box-sizing: border-box; }
+
+/* All icons in the interface are inline SVG (rationale in js/icons.js).
+   `display: block` is mandatory, not a matter of taste: an inline SVG sits
+   on the baseline, and the descender space of the line below it makes its
+   box taller than the image looks - --overlay-height above is calculated
+   against the block measurement. */
+svg.icon-symbol {
+  display: block;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+/* `touch-action: manipulation` drops double-tap zoom and keeps pinch zoom.
+   Not `none`: the effective value is the intersection along the ancestor
+   chain, so that would disable every scrolling container below. */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+button, input {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+button { cursor: pointer; }
+
+/* ---------- Control base classes ----------
+   The look every control-like element shares, so a new one inherits it by
+   taking the class instead of repeating the block. Both were copied
+   verbatim across the file before: the resting chrome eleven times, the
+   raised hover seven.
+
+   Placed here, ahead of every component: base and modifier are single
+   class selectors and thus of equal specificity, so source order alone
+   decides - a component further down has to be able to override.
+
+   The two `background` declarations are a fallback pair, not a leftover: a
+   browser that doesn't know `color-mix` drops the second line while
+   parsing and keeps the first. This is why the fill can't move into a
+   custom property - `var()` parses fine everywhere, and an invalid value
+   would only surface once computed, at which point the fallback in the
+   same rule is long gone and the surface ends up transparent. */
+.btn-surface,
+.keybar button,
+.path-row button {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
+  border-color: color-mix(in srgb, var(--text) 16%, transparent);
+  box-shadow: var(--glass-button);
+  color: var(--text-muted);
+  transition: background var(--dur), border-color var(--dur), color var(--dur);
+}
+/* Two hover idioms, and the choice between them is deliberate rather than
+   drift: everything inside a panel lifts its fill, everything sitting free
+   on the page picks up an accent edge. Hence no default on .btn-surface -
+   a new control has to name which of the two it is. */
+.btn-lift:hover,
+.path-row button:hover {
+  background: color-mix(in srgb, var(--surface-2) 84%, var(--text));
+  color: var(--text);
+}
+.btn-glow:hover,
+.keybar button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* An icon button without a surface of its own: no fill, no edge, the icon
+   carries it. The counterpart to .btn-surface for everything sitting inside
+   another control or a row. No hover here either - these buttons split
+   three ways (muted to full, muted to danger, none at all), which is one
+   distinction too many for a modifier. */
+.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  transition: color var(--dur);
+}
+
+/* No border-radius here: the setting was meant for the focus ring, but hit
+   the focused ELEMENT instead - a card with 12px corners snapped to 4px on
+   focus. An `outline` follows the element's own rounding automatically. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Height based on the ACTUALLY visible area instead of 100vh: on mobile the
+   on-screen keyboard slides over the page without 100vh noticing anything
+   of it - the end of the terminal and the key bar disappeared underneath
+   it. app.js maintains `--app-height` from the visualViewport height;
+   100dvh is the fallback for browsers without that interface, and
+   min-height remains as a floor.
+
+   No min-height in the calculation: with the keyboard open the page IS
+   ALLOWED to get smaller than 480px, otherwise nothing at all would be
+   gained. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: var(--app-height, 100dvh);
+}
+
+/* Pushes the group to the right edge. On the back button itself rather
+   than on a container: it's the only element on the left, and it only
+   becomes visible at all below 720px. */
+.back-btn { margin-right: auto; }
+.overlay-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--overlay-height);
+  height: var(--overlay-height);
+  padding: 0;
+  border: 1px solid var(--term-border);
+  border-radius: 9px;
+  /* Part of the floating bar above the terminal, hence its look rather
+     than the interface's surface color - border included. */
+  background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--term-bg) 82%, transparent);
+  border-color: color-mix(in srgb, var(--term-fg) 22%, transparent);
+  box-shadow: var(--glass-button);
+  color: var(--term-fg);
+  font-size: 14px;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* Only visible on narrow screens (mobile back navigation, see media query
+   below) - desktop shows the sidebar and panel at the same time. */
+.back-btn { display: none; }
+
+/* ---------- Shell ---------- */
+.shell {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 328px 1fr;
+  min-height: 0;
+  transition: grid-template-columns var(--dur);
+}
+
+/* ---------- Sidebar ---------- */
+/* A detached surface instead of a flush-mounted column, same language as
+   the terminal: 8px spacing and the same rounded corners. The spacing on
+   the right is deliberately left out - the terminal already brings its
+   own there, otherwise there'd be 16px in the middle against 8px on the
+   outer edges.
+
+   `overflow: hidden` belongs with the corners: the header and session list
+   draw all the way to the edge and would otherwise stick out past the
+   rounding. */
+.sidebar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 8px 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0; /* see rationale on .panel - grid item, implicit min-width: auto */
+}
+
+/* Replaces the removed top bar, which took up space while staying nearly
+   empty - wordmark + dark-mode/sidebar toggle together at the top edge of
+   the sidebar instead of hunting for a separate spot for each.
+   Stays in place when the sidebar is collapsed, see
+   .app[data-sidebar="collapsed"] further down - then forms the only
+   remaining visible "narrow strip" along with the re-expand button. */
+.sidebar-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.wordmark {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sidebar-head-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.sidebar-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.search-row { padding: 10px 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.search-input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  /* Recessed rather than raised: an input field takes something in, a
+     button gives something out - hence the inward shadow here and no light
+     edge on top. The same light, just thought through from the other
+     side. */
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
+  color: var(--text);
+}
+.search-input::placeholder { color: var(--text-muted); }
+/* Calmer than the global focus ring: a 2px outline with a 2px offset around
+   a field this size reads as glowing rather than as an unobtrusive "you're
+   here". The existing 1px border tinted in the accent color says the same
+   thing without the halo. */
+.search-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.project-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 2px 0 6px;
+}
+
+/* The project and its sessions form one card, and the earlier separator
+   line at the bottom is dropped in exchange: a list of horizontal 1px
+   lines reads like a table, the card edge achieves the same thing more
+   quietly.
+
+   The spacing to the sidebar edge sits here as margin rather than as
+   padding on the list: .sidebar has `overflow: hidden` for its own corners
+   and would otherwise clip the shadow at the outer edge.
+
+   `overflow: hidden` belongs with the rounding - the project row's hover
+   area draws all the way to the edge and would otherwise stick out past
+   the corners.
+
+   The fill is the surface token itself, not semi-transparent: over a
+   flat-colored background, a blended color can't be told apart from a
+   transparency, and the math stays readable this way. No drawn border - the
+   shadow alone separates the card from the background, so there's no edge
+   left to fight the rounded corners in either theme direction. */
+.project {
+  margin: 6px 8px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: var(--glass-surface);
+}
+.project-head {
+  width: 100%;
+  display: grid;
+  /* Without edit mode there's no remove icon, so there's no track for it
+     either: it would otherwise stand empty and push the session controls
+     roughly 24px away from the right edge. Only the mode adds it. */
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  /* A role="button" div doesn't get the pointer cursor a real <button>
+     picks up from the global rule further up - has to be spelled out here. */
+  cursor: pointer;
+  transition: background var(--dur);
+}
+.project-head:hover { background: var(--surface-hover); }
+.app[data-edit="on"] .project-head { grid-template-columns: 20px 1fr auto 16px; }
+.star-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--border);
+}
+.star-btn[data-fav="true"] { color: var(--accent); }
+/* Only visible in edit mode (toggleable in the settings menu below).
+   Previously it appeared on hover - there's no hover on mobile, so it was
+   either never there or always there. A toggle turns this into a
+   deliberate decision, the same on both kinds of device.
+
+   `display: none` instead of opacity 0: an invisible but clickable icon in
+   every project row would be exactly the trap this mode is meant to
+   prevent. */
+.remove-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  color: var(--text-muted);
+  transition: color var(--dur);
+}
+.app[data-edit="on"] .remove-btn { display: flex; }
+/* The column for it is 16px wide (see .project-head above) - with the
+   padding, exactly a 12px icon fits inside. */
+.remove-btn svg.icon-symbol { width: 12px; height: 12px; }
+.remove-btn:hover { color: var(--danger); }
+.project-name-col { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.project-name { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Hidden: the name alone is enough to tell projects apart in the list, and
+   the path stayed available in the tile's title attribute for anyone who
+   still needs it. */
+.project-path { display: none; }
+/* Pinned row of the open session: stays visible when the project is
+   collapsed - otherwise it would no longer be clear which conversation is
+   currently on the terminal. Outside .session-panel, so it stays
+   unaffected by that element's height animation.
+
+   Carries the same side padding as .session-scroll: the row is itself a
+   card, and without it, precisely the most important one would fall out
+   of the grid of the rest. */
+.pinned-session { padding: 0 10px 4px; }
+
+.session-panel {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height var(--dur) ease;
+}
+.project[data-open="true"] .session-panel { max-height: 2400px; }
+
+/* Session rows scroll on their own. A project with a long history would
+   otherwise flood the sidebar - with three-digit session counts, every
+   further project would get pushed out of the visible area.
+
+   The cap sits here and not on .session-panel: the expand/collapse
+   animation runs on that element, and having both on the same property
+   would interfere with each other. With few sessions the container stays
+   short on its own, so no empty space is created. */
+.session-scroll {
+  max-height: 300px;
+  /* The bottom spacing sits here and not on .session-panel: that element's
+     max-height of 0 can't shrink away the padding (border-box never gets
+     smaller than padding plus border), so every collapsed project would
+     otherwise carry 4px of dead space. The top spacing doesn't have that
+     problem - it's on the same element, but .session-panel is what's
+     actually clipped to 0, taking this whole box out of view along with
+     it - and gives the first row the same breathing room from
+     .project-head that the rows already have from each other. */
+  padding: 6px 10px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* scrolling doesn't spill over into the project list */
+  scrollbar-width: none; /* the track is narrow, a bar in it hurts more than it helps */
+}
+.session-scroll::-webkit-scrollbar { display: none; }
+/* Bottom fade so a long list hints there's more below without a scrollbar
+   to look at - set by updateScrollFade() in app.js, on scroll and after
+   every rebuild. A mask fades to the element's own transparency instead of
+   an overlay painted in the surface color - no light/dark upkeep, and
+   nothing to keep aligned with .pinned-session's different padding. */
+.session-scroll[data-more-below="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+/* Select and button form ONE control: the shared border sits on the
+   container, the children give up their own and are separated by a divider.
+   The dimming is keyed to `(hover: hover) and (pointer: fine)` rather than a
+   width - without a pointer there is no state before the click, so full
+   opacity is the normal case there. 0.7 and not lower: below that the
+   select's text and the "+" fall under reading contrast against the sidebar
+   before the pointer arrives. */
+.new-session-controls {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-color: color-mix(in srgb, var(--text) 16%, transparent);
+  border-radius: 8px;
+  box-shadow: var(--glass-button);
+  overflow: hidden;
+  transition: opacity var(--dur), border-color var(--dur);
+}
+/* Sits IN the control pill between the select and the "+", so the start
+   button stays on the right edge, where it has always been. Only visible
+   in edit mode: an invisible but clickable icon in every project row would
+   be exactly the trap this mode is meant to prevent - the same rationale
+   as for the remove icon further above.
+
+   Qualified via the container: `.new-session-controls button` further
+   below is more specific than a bare class and would otherwise beat
+   `display: none`. The remove icon escapes this only because it's a
+   `<span>` outside this container. */
+.new-session-controls .pin-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  transition: color var(--dur);
+}
+.app[data-edit="on"] .new-session-controls .pin-btn { display: inline-flex; }
+.pin-btn:hover { color: var(--text); }
+.pin-btn[data-configured="true"] { color: var(--accent); }
+.pin-btn[data-configured="true"] .pin-body { fill: currentColor; }
+.pin-btn svg { display: block; }
+@media (hover: hover) and (pointer: fine) {
+  .new-session-controls { opacity: 0.7; }
+  .project-head:hover .new-session-controls,
+  .new-session-controls:focus-within { opacity: 1; border-color: var(--text-muted); }
+}
+/* `overflow: hidden` on the container clips a child's outline, so the ring
+   moves off the children and onto the container, which doesn't clip its
+   own. Inside the pointer query because `:focus-visible` on a <select> also
+   matches a plain tap; `:has()` rather than `:focus-within` so a mouse click
+   alone doesn't draw it, and if `:has()` is missing only the ring is
+   gone. */
+.new-session-controls :focus-visible { outline: none; }
+@media (hover: hover) and (pointer: fine) {
+  .new-session-controls:has(:focus-visible) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+/* Same chip as in the session row (see .account-chip further below): the
+   select sits invisibly on top of the label, so the account looks and
+   behaves the same in both places. Flat and divided from the "+" by a
+   line instead of its own rounded corners - both now sit on the shared
+   container. */
+.new-session-controls .account-chip {
+  position: relative;
+  flex: 0 0 auto;
+  /* Taller than the row's chip: here it's the only control for choosing a
+     new session's account, and this whole area already runs at the small
+     end of a comfortable tap target (see the comment on the container). */
+  padding: 3px 6px;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+}
+.new-session-controls .account-chip select.account-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+}
+.new-session-controls button {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.new-session-controls button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+  filter: brightness(1.08);
+}
+.new-session-controls button:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Without a pointer, appearance alone carries recognizability - there's no
+   hover to explain the button after the fact. Hence the "+" there in the
+   accent color and the border one step stronger.
+   Deliberately ONLY color and stroke weight: size and padding stay
+   untouched, because the project row was painstakingly made wrap-free and
+   right-aligned. The tap target stays smaller than it should be. */
+@media not all and (hover: hover) {
+  .new-session-controls { border-color: var(--text-muted); }
+  .new-session-controls button:not(:disabled) { color: var(--accent); }
+}
+.new-session-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.session-row {
+  width: 100%;
+  display: grid;
+  /* Fixed widths instead of `auto` for everything right of the title: with
+     `auto`, each row aligns to its OWN content, and since the columns for
+     auth state and the end button are mostly empty, the time sat in a
+     different place in every row - the list looked restless.
+     Fixed tracks keep time, icons, and abbreviations aligned across rows,
+     no matter what's occupied in any given row.
+
+     Auth state and account stay separate columns: a session can be
+     running under the right account and still be expired. */
+  grid-template-columns: 14px 1fr 30px 26px 0;
+  align-items: center;
+  gap: 6px;
+  /* Less on the right than on the left, because the last track is 0 wide
+     in normal operation, but its spacing still counts: the account chip
+     would otherwise end 18px from the edge and thus visibly inside the
+     project row's control pill. The indent relative to the project is now
+     achieved by .session-scroll's padding, no longer by the padding
+     here. */
+  padding: 9px 8px 9px 12px;
+  /* Its own card inside the project card, so the individual chats read as
+     their own boxes.
+
+     Hence text color blended into the fill rather than simply taking the
+     next surface token: a palette's surface tokens are only 4 to 7 RGB
+     units apart, three layers built from them would have stayed
+     indistinguishable. Blended-in text color moves the surface away from the
+     background instead in whichever direction the palette currently needs
+     - lighter in the dark direction, darker in the light direction. A
+     single percentage is then enough for all eight palettes and both
+     directions.
+
+     For the shadow see --glass-card above. */
+  margin: 0 0 6px;
+  /* Explicit 0, not just an absent declaration: the row is a <button>, and
+     without this the browser's own UA-stylesheet border (a grey outset
+     ring) shows through where the drawn border used to sit on top of it. */
+  border: 0;
+  border-radius: 9px;
+  background: var(--surface-hover); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
+  box-shadow: var(--glass-card);
+  text-align: left;
+  transition: background var(--dur);
+}
+.session-row:hover:not(:disabled) {
+  background: var(--surface-hover); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 84%, var(--text));
+}
+.session-row:disabled { opacity: 0.6; cursor: default; }
+/* --accent-soft is semi-transparent and would sit BEHIND the card fill,
+   not on top of it - as a state indicator that was no longer recognizable
+   against the box. The accent is therefore blended into the fill instead -
+   no border left to carry an accent edge, so the fill alone marks the
+   active row. */
+.session-row[data-active="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
+  box-shadow: var(--glass-card);
+}
+/* On running sessions, the status dot doubles as the end button: it shows
+   a power icon in the live colour, so the action is visible without a
+   hover and sits exactly where the state it concerns is shown. Idle
+   sessions get the same icon, muted. That saves a dedicated column at the
+   end of the row, which stays calmer as a result.
+
+   The cell is a larger click target than the visible icon - 7px wouldn't
+   be hittable with a finger. */
+.dot {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.dot svg.icon-symbol {
+  width: 11px;
+  height: 11px;
+  stroke-width: 1.8;
+  color: var(--text-muted);
+}
+/* The icon knows two states, not four: the session runs or it doesn't.
+   Whether it is WORKING is carried by the cone of light across the title
+   alone. */
+.dot[data-state="live"] svg.icon-symbol,
+.dot[data-state="working"] svg.icon-symbol,
+.dot[data-state="waiting"] svg.icon-symbol { color: var(--live); }
+.dot[data-stop]:hover svg.icon-symbol,
+.dot[data-stop]:focus-visible svg.icon-symbol { color: var(--danger); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* Two lines: on top the title that Claude Code assigns on the first prompt
+   and then leaves in place, below it the most recent prompt. Previously
+   the most recent prompt itself stood there as the title - it changed on
+   every reply, and with it the whole list looked different on every
+   turn.
+
+   `min-width: 0` is necessary for the ellipsis to take effect: a grid item
+   otherwise grows beyond its track along with its content. */
+.session-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.session-name,
+.session-preview {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-name {
+  font-size: 13.5px;
+  color: var(--text);
+}
+/* While a session is working, a cone of light travels across its title -
+   a gradient clipped to the text, built like .login-waiting's. In the row
+   this is the only thing that says a session is busy; the power icon next
+   to it reports whether the session runs at all.
+
+   Only `working`: `live` is the placeholder the row is built with before
+   the stream has said anything, and a session that never gets a registry
+   entry keeps it forever - the title would claim work that isn't
+   happening.
+
+   `:has()` instead of a flag on the row: the dot's state is written from
+   several places (row build, stream update, the quiet fetch tick), and a
+   mirrored attribute is where those would drift apart. Where `:has()` is
+   missing, the title simply stays calm.
+
+   The project title runs the same cone while the project is collapsed, and
+   there `:has()` is not available at all: a collapsed project builds no
+   session rows, so there is nothing to match. Hence `data-busy`, written
+   from the same measured state the dots are built from - the flag is a
+   second way of showing one state, not a second state. Open again, the
+   rows report it themselves and more precisely, so the title stops.
+
+   The resting tone sits a step above muted rather than on it: a title
+   dimmed all the way down between sweeps is hard to read while it is
+   exactly the title one wants to read. Lifting the base costs the cone
+   contrast, and only some of that comes back through --text-bright at the
+   peak - --text is the end of the palette, so a cone peaking there can be
+   no brighter than the text it sweeps across. What the peak gives back is
+   width rather than height - the two stops at 45% and 55% form a plateau,
+   not a point, so a run of letters stands at full brightness as the cone
+   passes. */
+.session-row:has(.dot[data-state="working"]) .session-name,
+.project[data-open="false"][data-busy="true"] .project-name {
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--text-muted) 70%, var(--text)) 36%,
+    var(--text-bright) 45%,
+    var(--text-bright) 55%,
+    color-mix(in srgb, var(--text-muted) 70%, var(--text)) 64%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+/* The global reduced-motion rule only shortens the duration - the gradient
+   would freeze mid-sweep and leave the title half muted. Hence its own way
+   out, as with .login-waiting. */
+@media (prefers-reduced-motion: reduce) {
+  .session-row:has(.dot[data-state="working"]) .session-name,
+  .project[data-open="false"][data-busy="true"] .project-name {
+    animation: none;
+    background-image: none;
+    color: var(--text);
+  }
+}
+.session-preview {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.account-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  /* Fixed track (see .session-row): an account without a configured
+     abbreviation shows its full name - that gets truncated here instead of
+     blowing out the column width of the whole row. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+/* If a session runs with a token that doesn't belong to any stored account
+   (or with none at all), that should stand out instead of disguising
+   itself as an inconspicuous gray chip - a state that otherwise goes
+   unnoticed for months. No background of its own, so the icon doesn't
+   drown in a colored area.
+   The chip has carried the color itself since the switch to SVG - before
+   that the emoji brought its own. "expiring" stays excluded from this, for
+   the same reason as the banner below. */
+.account-chip[data-warn="true"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  padding: 1px 2px;
+  color: var(--danger);
+}
+.account-chip[data-warn="true"][data-kind="expiring"] { color: var(--text); }
+.account-chip[data-warn="true"] svg.icon-symbol { width: 12px; height: 12px; }
+
+/* The three message surfaces in the panel take the form of a card instead
+   of an edge-to-edge strip: the 8px spacing aligns with .terminal-wrap
+   below it, so the message reads as something that sits IN FRONT OF the
+   terminal, not as part of its frame.
+
+   The border runs all the way around instead of just at the bottom - a
+   card has four edges. Color is set by the state rules further down,
+   hence only the width and a transparent base value here. */
+.auth-banner,
+.login-banner,
+.error-banner {
+  margin: 8px 8px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  box-shadow: var(--glass-button);
+}
+
+/* Deliberately no red for "expiring": this state explicitly blocks
+   nothing, it's the last chance to act BEFORE something breaks. Making it
+   look like a failure would dull the warning. */
+.auth-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+}
+/* Signpost back into the assistant while a login is in progress. Built on
+   the same strip as the auth banner above it - both say the same thing:
+   this surface doesn't currently show what it looks like. */
+.login-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.login-banner[hidden] { display: none; }
+/* The button carries its own width here: .btn-ghost is designed for the
+   form column in the window and would otherwise be stretched across the
+   whole bar. */
+.login-banner .btn-ghost { width: auto; margin-top: 0; margin-left: auto; }
+
+.auth-banner[data-kind="expired"],
+.auth-banner[data-kind="invalid"] {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.auth-banner[data-kind="expiring"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+/* Protection from the idle reaper is an intervention on the underlying
+   data and therefore appears only in edit mode - like the remove icon on
+   projects. In normal operation the track is 0 wide, so the row looks
+   unchanged.
+
+   A filled icon means protected, an outlined one doesn't - both drawn as
+   inline SVG, so neither depends on a font that may not carry the glyph. */
+.lock-btn { display: none; }
+.app[data-edit="on"] .session-row {
+  grid-template-columns: 14px 1fr 30px auto 18px;
+}
+.app[data-edit="on"] .lock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-muted);
+  transition: color var(--dur);
+}
+.lock-btn[data-locked="true"] { color: var(--accent); }
+.lock-btn:hover { color: var(--text); }
+
+/* The chip doubles as the account switch: the native picker of an
+   invisible select sits on top of it, which is the only control that opens
+   a proper list on the phone.
+   min-width only matters in edit mode, where the chip's track is `auto`
+   (see .app[data-edit="on"] .session-row above) - in normal mode the
+   row's own 26px track already stretches it, so an empty chip (deleted
+   account) stays 26px wide regardless.
+   min-height is what an empty chip actually needs: with no text there is
+   no line box, .session-row's `align-items: center` doesn't stretch the
+   chip to the row's height, and the absolutely positioned select
+   contributes no height of its own - without it the tap target was just
+   the chip's ~2px of vertical padding, on exactly the row that needs the
+   picker to heal. */
+.session-row .account-chip { position: relative; min-width: 22px; min-height: 14px; }
+
+.session-row .account-chip[data-stored="true"] {
+  opacity: 0.55; /* stored, not measured - see buildSessionRow */
+}
+
+.account-select-inline {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.account-select-inline:disabled { display: none; }
+
+.session-time {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right; /* "2m" and "16m" end at the same edge */
+}
+.empty-state {
+  /* Attached to .session-panel, i.e. one level above the cards: the 22px
+     sums up that element's indentation (10px .session-scroll + 12px inside
+     the card), so the text aligns with the session titles. */
+  padding: 2px 12px 8px 22px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.add-project {
+  padding: 10px 12px 14px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.add-project-toggle,
+.accounts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 11px;
+  font-size: 12.5px;
+}
+.add-project-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.add-project input,
+.accounts-panel input,
+.notify-add input {
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  /* Recessed like .search-input - rationale is documented there. */
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
+  color: var(--text);
+  width: 100%;
+}
+/* The accent belongs to the action that COMPLETES a step - exactly one per
+   section. Previously every button in the area carried it, including the
+   expand/collapse toggles: same-weight surfaces side by side, with no way
+   to tell which one creates something and which one just expands one.
+   Which button gets the accent is therefore decided by handing out the
+   class, NOT by which container it happens to sit in: this used to be
+   scoped to three parents, so the save button of the target edit form and
+   every later one rendered as an unstyled white browser button. */
+.btn-accent {
+  font-size: 12px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  box-shadow: var(--glass-button);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+.btn-accent:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+.accounts-panel { margin-top: 10px; border-top: 1px solid var(--border); padding: 10px 12px 14px; }
+.accounts-list { margin-bottom: 8px; display: flex; flex-direction: column; gap: 2px; }
+/* Everything else this button needs comes from .btn-quiet and .manage-action,
+   which it is always handed together with - only the smaller icon is its
+   own. */
+.account-edit-btn svg.icon-symbol { width: 12px; height: 12px; }
+/* flex-wrap, ever since the form additionally contains a token field: name
+   + abbreviation + token + two buttons no longer fit in one row of the
+   ~280px-narrow sidebar. The token field gets its own full row below it
+   (tokens are ~110 characters long, a narrow field would be unusable). */
+.account-edit-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* In the management row, the form takes the place of the name and edit
+   icon and gets their width - otherwise it crowded together at the left
+   edge. */
+.manage-row .account-edit-form { flex: 1 1 auto; }
+.account-edit-form input {
+  width: auto;
+  padding: 2px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.account-edit-name { width: 90px !important; }
+.account-edit-abbr { width: 34px !important; text-align: center; }
+.account-edit-token { flex: 1 0 100%; width: 100% !important; }
+.account-edit-form button {
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+/* Same hierarchy as in the large form, but at this row's size: btn-ghost
+   would otherwise need the full width and blow out the inline-flex,
+   btn-accent needed the padding of a primary button. */
+.account-edit-form .btn-accent,
+.account-edit-form .btn-ghost {
+  width: auto;
+  margin-top: 0;
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+/* Sets itself apart from the save button next to it without glowing red
+   permanently: the row is tight, and a constantly red button would draw
+   the eye to the action you want the least often. */
+.account-edit-delete { margin-left: auto; }
+.account-edit-delete:hover { color: var(--danger); background: var(--danger-soft); }
+.accounts-empty-hint { font-size: 11.5px; color: var(--text-muted); font-style: italic; margin-bottom: 8px; }
+.add-account-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.account-name-row { display: flex; gap: 6px; }
+.account-name-row #newAccountName { flex: 1 1 auto; }
+.account-name-row #newAccountAbbr { flex: 0 0 64px; width: 64px; text-align: center; }
+.path-row { display: flex; gap: 6px; }
+.path-row input { flex: 1 1 auto; }
+.path-row button {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+}
+
+.folder-browser {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 6px;
+}
+.folder-browser-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 4px 6px;
+  word-break: break-all;
+}
+.folder-browser-list {
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.folder-browser-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.folder-browser-list button:hover { background: var(--surface-hover); }
+.folder-browser-empty { font-size: 11.5px; color: var(--text-muted); font-style: italic; padding: 4px 6px; }
+
+.btn-ghost {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--text) 16%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background var(--dur), color var(--dur);
+}
+/* Background lift instead of a border glow, same as everywhere else in the
+   settings window - the fill starts fully transparent here, so it's the
+   surface's own hover tone rather than the blended-in card tone above. */
+.btn-ghost:hover { color: var(--text); background: var(--surface-hover); }
+
+/* One step of the login wizard. All of them stack vertically, separated by
+   a line; whatever isn't due yet is locked. Showing only the current step
+   had no way back - anyone who accidentally jumped ahead could no longer
+   reach the skipped step. */
+.login-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.login-step:first-child { padding-top: 4px; border-top: 0; }
+.login-step[hidden] { display: none; }
+/* Three stages. Whatever comes next recedes far into the background - it
+   should be recognizable that something follows, without capturing
+   attention. Grayed out AND disabled (see app.js): a merely pale button
+   would still be clickable, via keyboard just as much as by touch. The
+   lock lives in the markup, the paleness here. */
+.login-step[data-active-entry="false"] { opacity: 0.3; }
+
+/* Completed steps only step back a little, and only via their heading and
+   explanatory text: their controls stay at full opacity, because it
+   should be possible to repeat a step. Hence no opacity on the box itself
+   - that couldn't be undone again on a child. */
+.login-step[data-active-entry="true"][data-done="true"] .login-step-header,
+.login-step[data-active-entry="true"][data-done="true"] .settings-hint,
+.login-step[data-active-entry="true"][data-done="true"] .login-fallback {
+  opacity: 0.5;
+}
+/* CSS counts the numbers instead of writing them into the markup: when
+   renewing a token, the name step is skipped, and fixed digits would then
+   start at two. */
+.add-account-form { counter-reset: loginstep; }
+.login-step:not([hidden]) { counter-increment: loginstep; }
+.login-step-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.login-step-header::before { content: counter(loginstep) " · "; }
+/* A cone of light travels across the text while waiting. Startup takes a
+   few seconds, and a static sentence during that time looks like a frozen
+   window.
+
+   The gradient is clipped to the text (background-clip), the text itself
+   is transparent - hence the base tone lives in the gradient and not in
+   `color`. */
+.login-waiting {
+  margin: 2px 8px 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  background-image: linear-gradient(
+    100deg,
+    var(--text-muted) 35%,
+    var(--text) 50%,
+    var(--text-muted) 65%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 3.4s linear infinite;
+}
+.login-waiting[hidden] { display: none; }
+@keyframes shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+/* Anyone who has turned off motion gets the text calm and readable -
+   without the gradient, which without animation would just be a lopsided
+   color transition. */
+@media (prefers-reduced-motion: reduce) {
+  .login-waiting {
+    animation: none;
+    background-image: none;
+    color: var(--text-muted);
+  }
+}
+
+/* The manual route: one line of text with a link inside it, no second
+   button. It's the stopgap and shouldn't compete with the steps. */
+.login-fallback { font-style: italic; }
+
+/* The wizard's result. Deliberately no green checkmark banner: the
+   account then appears in the list above, that's the real confirmation -
+   here the sentence with the start of the token is enough, so it's
+   traceable what got saved. */
+.login-success {
+  margin: 2px 8px 4px;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.login-success[hidden] { display: none; }
+/* The start of the token inside it stays readable, close to monospace. */
+.login-success { font-variant-ligatures: none; }
+
+/* Marks the account that was just created or changed, until the window
+   closes. Green like the dot of a running session - there's no need for a
+   second success color. The list isn't sorted by age; without a marker,
+   the affected entry wouldn't be findable among the others. */
+.account-marker {
+  color: var(--live);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.token-manual { display: flex; flex-direction: column; gap: 6px; }
+.token-manual[hidden] { display: none; }
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-btn:hover:not(:disabled) { color: var(--accent-strong); }
+/* Locked while the countdown is running - the manual route is already
+   there so you know about it before you need it. */
+.link-btn:disabled {
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* The login button is an <a> and doesn't have `disabled`. Until the URL
+   has been read off the screen it has no href - that alone already locks
+   it, but this rule is what makes it visible. */
+.login-link[aria-disabled="true"] {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Carries the accent like a button, but is an <a> (see index.html). */
+.login-link {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+.login-link[hidden] { display: none; }
+
+/* ---------- Main panel ---------- */
+/* `min-width: 0` isn't cosmetic here: .panel and .sidebar are grid items
+   in .shell, and grid items implicitly have `min-width: auto` - so they
+   can't get narrower than their widest content. On mobile that blew the
+   1fr column out past the viewport width, and the whole page could be
+   dragged sideways.
+   Same pattern as the `min-height: 0` already present, just for the other
+   axis. */
+.panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+/* ---------- Floating control bar above the terminal ----------
+   pointer-events is load-bearing here, not a nicety: the container spans
+   the full width of the terminal. Without `none`, its invisible area
+   would intercept every click next to it instead of letting it through to
+   the terminal - focusing by click would be broken. The controls
+   themselves reclaim `auto` individually. */
+.terminal-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  /* Equal all around. The bottom spacing drops out on narrow screens,
+     because the key bar follows directly there (see media query). */
+  margin: 8px;
+}
+.panel-overlay {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.panel-overlay > * { pointer-events: auto; }
+
+/* .panel-overlay forms its own stacking context via position:absolute plus
+   its own z-index - the z-index of its children (e.g. .overlay-menu)
+   therefore only counts WITHIN this context, and only the value set here
+   applies to the outside. From 721px up it has to sit above
+   .copy-text-panel (z-index 20), otherwise the bar along with any open
+   menu would be both invisible AND unreachable while the text view is
+   open - .panel-overlay stays pointer-events:none, only its children
+   reclaim it, so the text view underneath loses no clickable area as a
+   result.
+   Below 720px the base rule (z-index 5) stays unchanged: there the text
+   view deliberately covers everything, and the key bar outside
+   .terminal-wrap is the way out in that case. */
+@media (min-width: 721px) {
+  .panel-overlay { z-index: 21; }
+}
+
+/* No idle state needed for .overlay-btn itself anymore - the class now
+   only carries the back button, which is gone on desktop anyway via
+   .back-btn{display:none}; below 720px the media query further down sets
+   its own fixed opacity. The transition remains for that switch. */
+.panel-overlay .overlay-btn { transition: opacity var(--dur); }
+
+/* Understated in the idle state, so the bar doesn't cover the terminal
+   content underneath it - full opacity on approach. There's no hover on
+   mobile: there the bar permanently carries a bit more opacity (see media
+   query below).
+   The group additionally carries the account pill's value: it's allowed
+   to hold back the least, because it's the only one that carries
+   information rather than an action. The buttons dim further on top of
+   that - opacity multiplies, a child can't get brighter than its
+   parent. */
+.panel-overlay .overlay-group { opacity: 0.9; transition: opacity var(--dur); }
+.overlay-group .mode-switch,
+.overlay-group .overlay-menu-btn { opacity: 0.5; transition: opacity var(--dur); }
+.panel-overlay:hover .overlay-group,
+.panel-overlay:hover .overlay-group .mode-switch,
+.panel-overlay:hover .overlay-group .overlay-menu-btn { opacity: 1; }
+
+/* While the menu is open, nothing about the group holds back - a
+   see-through menu over terminal text isn't readable. */
+.panel-overlay .overlay-group[data-menu="open"],
+.overlay-group[data-menu="open"] .mode-switch,
+.overlay-group[data-menu="open"] .overlay-menu-btn { opacity: 1; }
+
+/* One surface for the mode switch, account, and ···: three separate
+   islands above the terminal looked more restless than one group, and the
+   reason for keeping them separate - a spacer between them - went away
+   with the redesign. */
+.overlay-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--term-bg) 82%, transparent);
+  border: 1px solid var(--term-border);
+  /* Here the blur is genuine and stays: terminal text sits below the
+     bar, i.e. real content - unlike the sidebar, where a flat-colored
+     surface offers nothing to blur. The shadow is added on top, so the
+     bar carries the same elevation as the cards.
+     The edge picks up the terminal foreground instead of --text: the bar
+     belongs to the terminal and follows its colors, not the palette's. */
+  border-color: color-mix(in srgb, var(--term-fg) 22%, transparent);
+  box-shadow: var(--glass-button);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+/* The children no longer bring their own background - it would otherwise
+   be doubled and put a box inside the box. No shadow of their own either:
+   the group is ONE elevated surface, a second one inside it would be
+   exactly the box-in-a-box that this block prevents. */
+.overlay-group .mode-switch,
+.overlay-group .account-badge {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.overlay-menu-wrap { position: relative; display: flex; }
+.overlay-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Stays under the height of .mode-switch (32px) - that's the tallest
+     direct child of the group, see the calculation for --overlay-height. */
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--term-fg);
+  font-size: 13px;
+  line-height: 1;
+}
+.overlay-menu-btn:hover { background: var(--accent-soft); }
+/* Below the button, aligned to the right edge - like the usage popover on
+   the pill next to it. Own background, because the terminal underneath
+   would otherwise show through. */
+.overlay-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: 10px;
+  box-shadow: var(--glass-floating);
+}
+.overlay-menu[hidden] { display: none; }
+.overlay-menu button {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+}
+.overlay-menu button:hover { background: var(--surface-hover); }
+
+.mode-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--term-bg) 82%, transparent);
+  border: 1px solid var(--term-border);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.mode-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Fixed rather than emerging from line-height and padding: the content is
+     an SVG, which brings no line-height. --overlay-height at the top is
+     summed from this number. */
+  height: 26px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--term-fg);
+  opacity: 0.55;
+  transition: background var(--dur), opacity var(--dur);
+}
+.mode-switch button:hover { opacity: 1; }
+.mode-switch button[data-active="true"] {
+  background: var(--accent-soft);
+  opacity: 1;
+}
+
+.account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--term-bg) 82%, transparent);
+  border: 1px solid var(--term-border);
+  color: var(--term-fg);
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.account-badge:empty { display: none; }
+/* The pill has also been a trigger since the usage popover was added - the
+   pointer cursor conveys that, without it giving up its appearance as an
+   information field. */
+.account-badge { cursor: pointer; }
+.account-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Usage popover: hangs below the pill at the right edge of the panel.
+   Above the terminal iframe, hence its own stacking context complete with
+   a background - the terminal underneath would otherwise show through and
+   make the numbers unreadable. */
+.usage-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  /* Fixed width that shrinks along on narrow devices: max-width refers to
+     .panel-overlay, which holds a 10px margin on the left and right - that
+     way the popover can never exceed the screen.
+     Height is measured against --app-height, not vh: on the iPhone, vh
+     extends past the visible area (see the comment on .app). */
+  width: 304px;
+  max-width: 100%;
+  max-height: calc(var(--app-height, 100dvh) - 72px);
+  overflow-y: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(20, 23, 29, 0.97); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--term-bg) 97%, transparent);
+  border: 1px solid var(--term-border);
+  border-color: color-mix(in srgb, var(--term-fg) 22%, transparent);
+  color: var(--term-fg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--glass-floating);
+}
+.usage-popover[hidden] { display: none; }
+
+/* Catches the click outside it. Invisible and without a color of its own:
+   it's not meant to darken anything, only to catch clicks - the terminal
+   underneath stays readable. z-index below the popover (5), so the
+   popover stays usable. */
+.usage-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+}
+.usage-backdrop[hidden] { display: none; }
+
+/* Account on the left, model on the right - both apply to everything
+   below. */
+.usage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--term-border);
+}
+.usage-model { opacity: 0.6; }
+
+/* The bar gets its own row across the full width: sharing a row with the
+   label and percentage value, it was left with roughly 100px on a mobile
+   display, and in that space 60% and 70% look the same. */
+.usage-row + .usage-row { margin-top: 12px; }
+.usage-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.usage-label { opacity: 0.75; }
+.usage-value { font-variant-numeric: tabular-nums; }
+.usage-extra {
+  display: block;
+  opacity: 0.6;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
+/* Only appears when depletion is imminent (see js/usage.js) and is
+   therefore allowed to hold back less than the other labels. */
+.usage-forecast {
+  opacity: 0.85;
+  color: #c8a13a;
+}
+
+.usage-bar {
+  display: block;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.25);
+  overflow: hidden;
+}
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+}
+/* The same four tiers as in the terminal's statusline script, so the
+   terminal and browser never show different colors for the same state.
+   The tier-to-color mapping is decided by the server (see
+   routes/usage.js). The colors sit here directly rather than as theme
+   variables: the popover sits on top of the terminal, i.e. always on a
+   dark background - the light theme values (--live, --danger) would be
+   too dark there. */
+.usage-bar.tier-dim { color: rgba(148, 155, 168, 0.85); }
+.usage-bar.tier-ok { color: #5aa469; }
+.usage-bar.tier-warn { color: #c8a13a; }
+.usage-bar.tier-crit { color: #d4736b; }
+
+.usage-footer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--term-border);
+  opacity: 0.6;
+  font-size: 11px;
+}
+.usage-footer.usage-error {
+  opacity: 0.95;
+  color: #d4736b;
+}
+.usage-hint { opacity: 0.6; }
+
+/* Account switch in the popover: select and button on one line, the note
+   below in the muted hint style already used here. */
+.usage-switch { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.usage-switch select { flex: 1 1 auto; min-width: 0; }
+/* Plain browser chrome would read as a foreign white box on this dark
+   glass surface - matched to the popover's own border and text color. */
+.usage-switch select,
+.usage-switch button {
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--term-border);
+  background: transparent;
+  color: var(--term-fg);
+}
+.usage-switch button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.usage-switch button:disabled { opacity: 0.55; cursor: not-allowed; }
+.usage-switch .usage-hint { flex-basis: 100%; margin-top: 2px; }
+
+.error-banner {
+  flex: 0 0 auto;
+  /* display is set to none/flex in js/messages.js - only the remaining values
+     here. */
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 14px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+  font-size: 12.5px;
+}
+.error-banner span { flex: 1 1 auto; min-width: 0; }
+.error-banner-close {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 32px edge length despite the small text: on mobile that's the tap
+     target, and the bar itself is only about 30px tall. */
+  width: 32px;
+  height: 32px;
+  margin: -6px -8px -6px 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 15px;
+  line-height: 1;
+}
+.error-banner-close:hover { opacity: 1; }
+
+.terminal-frame {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 10px;
+  border: 1px solid var(--term-border);
+  background: var(--term-bg);
+}
+
+/* Only on narrow screens: on desktop the real keyboard achieves the same
+   thing more directly, and the bar would only cost height there.
+   Visibility via media query and an attribute on the root element instead
+   of via inline styles - those would override every rule here. */
+.keybar {
+  display: none;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 18px 14px;
+}
+/* Only this row scrolls. The arrow block on the right and the expand
+   button on the left stay put - what would otherwise slide off to the
+   right was, of all things, what gets used most often. */
+.keybar-keys {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain; /* swiping doesn't spill over onto the page */
+  scrollbar-width: none; /* the bar is narrow, a scrollbar in it hurts more than it helps */
+  gap: 6px;
+}
+.keybar-keys::-webkit-scrollbar { display: none; }
+/* Expanded, a grid with equal-width columns instead of wrapping flex: when
+   wrapping, each key aligned to the width of its own label, which made
+   the rows reach different distances and created gaps - the bar looked
+   randomly bunched together.
+
+   `auto-fill` with a minimum width instead of a fixed column count: the
+   bar exists on devices from 320 to 720px wide, a fixed number would be
+   either too tight or too sparse.
+
+   40px as the minimum width even though the keys are 44px tall: besides
+   the key row there's still the arrow block and the expand button, which
+   leaves about 176px on a 390px-wide device. At equal width and height,
+   three columns would fit there and the eight keys would need three rows;
+   slightly narrower gives four columns and two rows. Here the height
+   carries the tap target. */
+.keybar[data-expanded="true"] .keybar-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  overflow-x: visible;
+}
+/* In the grid, the track dictates the width - a minimum width on the
+   button would blow it out. It stays when collapsed, where the row
+   scrolls instead. */
+.keybar[data-expanded="true"] .keybar-keys button { min-width: 0; }
+/* Collapsed: two columns for up/down, expanded: three for the inverted-T
+   layout. One single block for both states instead of two markup
+   variants: otherwise the same keys would depend on two places. */
+.keybar-arrows {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.keybar-arrows [data-key="ArrowLeft"],
+.keybar-arrows [data-key="ArrowRight"] { display: none; }
+.keybar[data-expanded="true"] .keybar-arrows { grid-template-columns: repeat(3, auto); }
+.keybar[data-expanded="true"] .keybar-arrows [data-key="ArrowLeft"],
+.keybar[data-expanded="true"] .keybar-arrows [data-key="ArrowRight"] { display: block; }
+.keybar[data-expanded="true"] .keybar-arrows [data-key="ArrowUp"] { grid-area: 1 / 2; }
+.keybar[data-expanded="true"] .keybar-arrows [data-key="ArrowLeft"] { grid-area: 2 / 1; }
+.keybar[data-expanded="true"] .keybar-arrows [data-key="ArrowDown"] { grid-area: 2 / 2; }
+.keybar[data-expanded="true"] .keybar-arrows [data-key="ArrowRight"] { grid-area: 2 / 3; }
+/* The chevron points up as long as there's something to expand. */
+.keybar[data-expanded="true"] .keybar-more svg { transform: rotate(180deg); }
+.keybar-more { flex: 0 0 auto; }
+.keybar-more svg { transition: transform var(--dur); }
+@media (max-width: 720px) {
+  .keybar { display: flex; }
+  .app[data-tab="files"] .keybar { display: none; }
+}
+.keybar button {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  /* Fixed height instead of computing it from padding: some keys carry
+     text, others an SVG with no line-height - deriving it from padding
+     produced keys of different heights in the same row. 40px balances the
+     tap target for a thumb against the height the bar takes away from the
+     terminal across two rows. */
+  height: 40px;
+  min-width: 40px;
+  padding: 0 10px;
+  /* Full text color rather than the muted tone .btn-surface hands out: the
+     bar sits on the page background with no surface under it, and the keys
+     have to stay readable at a glance while typing. */
+  color: var(--text);
+  flex: 0 0 auto;
+}
+/* There's no hover on mobile - the state BEFORE the click is missing
+   there, so the feedback has to happen on press instead. The key sinks
+   in: shine and outer shadow gone, an inward shadow instead. */
+.keybar button:active {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 80%, var(--accent));
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.22);
+}
+/* The SVG buttons carry no text - without this alignment they'd sit lower
+   than their neighbors. `currentColor` in the SVG picks up the button's
+   color, including across the light/dark switch.
+
+   A dedicated class instead of `:has(svg)`: the relational selector needs
+   a newer browser than everything else here, and it buys nothing at this
+   point that a class name couldn't do just as well. */
+.keybar button.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Height is set on the button itself (see .keybar button), padding here
+     only governs the width. */
+  padding: 0 10px;
+}
+.keybar button svg { display: block; }
+
+/* ---------- Management: projects & accounts ----------
+   The three blocks used to sit stacked in the sidebar's footer and looked
+   restless there. They now live behind a single, understated button - the
+   sidebar carries only what's needed constantly: search and project
+   list. */
+.sidebar-foot {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.manage-toggle {
+  width: 100%;
+  padding: 8px 11px;
+  font-size: 12px;
+  text-align: left;
+}
+.sidebar-foot { display: flex; gap: 6px; align-items: flex-start; }
+.manage-toggle { flex: 1 1 auto; }
+.settings-toggle {
+  display: flex;
+  flex: 0 0 auto; /* don't shrink along with the wide button next to it */
+  letter-spacing: 1px;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+/* Terminal base tone in three tiers. Border and content always carry the
+   same value - CSS can't reach the content, JS passes it there via ttyd's
+   theme option (see withTerminalOptions() in js/terminal.js).
+
+   The tiers differ precisely in WHAT they're tied to: the first two are
+   fixed tones and stay dark in every mode, the third one takes the
+   interface's surface color - so both palette AND light/dark. Hence
+   `--bg` and not `--p-dark-bg`: the value is already resolved by this
+   point, and it's the same one the surface behind the terminal carries.
+   With "no border" there's then no edge left there. */
+:root[data-term-bell="dark"] {
+  --term-bg: #14171d;
+  --term-fg: #e7e4da;
+  --term-border: #262b33;
+}
+:root[data-term-bell="palette"] {
+  --term-bg: var(--bg);
+  --term-fg: var(--text);
+  --term-border: var(--border);
+}
+
+/* No border: border and corners drop away, the terminal then sits there
+   as a flat surface instead of a detached tile. The spacing all around it
+   is deliberately kept - without it the terminal would stick to the
+   sidebar. */
+:root[data-term-border="off"] .terminal-frame {
+  border: 0;
+  border-radius: 0;
+}
+
+/* ---------- Palette selection in the settings window ----------
+   The preview dot shows the palette split in half: base tone against
+   accent, exactly the two values the palettes differ in. It reads them
+   from the entry's own variables - which is why every palette block above
+   is also hung off .palette-item. Otherwise there'd need to be a second
+   list of color values just for the preview. */
+.palette-list { display: flex; flex-direction: column; gap: 2px; }
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background var(--dur);
+}
+.palette-item:hover { background: var(--surface-hover); }
+/* Background instead of a border ring, same as .session-row[data-active] -
+   the picked palette stands out through its own fill rather than an
+   accent-colored edge. */
+.palette-item[data-active="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
+}
+.palette-dot {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  /* Stronger than the other borders in the menu: the darkest palette
+     fills its half with a tone that barely stands out from the menu
+     surface - without a visible outline, only the accent would be
+     visible for it. */
+  border: 1px solid var(--text-muted);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--p-light-bg) 50%, var(--p-light-accent) 50%);
+}
+/* The same resolution order as for the color variables above: system
+   preference, then the explicit choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .palette-dot {
+    background: linear-gradient(135deg, var(--p-dark-bg) 50%, var(--p-dark-accent) 50%);
+  }
+}
+:root[data-theme="dark"] .palette-dot {
+  background: linear-gradient(135deg, var(--p-dark-bg) 50%, var(--p-dark-accent) 50%);
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-item:hover { background: var(--surface-hover); }
+.settings-section {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.settings-section-head {
+  padding: 2px 8px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+/* From the warning threshold onward, the heading stands out - the state
+   is then no longer just information, but a warning. */
+.settings-section-head[data-warn="true"] { color: var(--danger); }
+.protected-list { max-height: 180px; overflow-y: auto; }
+.protected-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+}
+.protected-row:hover { background: var(--surface-hover); border-radius: 6px; }
+.protected-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.protected-project {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.protected-row .btn-ghost {
+  padding: 2px 6px;
+  font-size: 10.5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.protected-row .btn-ghost:hover { background: var(--danger-soft); color: var(--danger); }
+.settings-warn {
+  margin: 6px 8px 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settings-hint {
+  margin: 2px 8px 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+/* Row layout like .protected-row, with two more columns for the actions.
+   The summary shrinks first: it's the least important part of the row and
+   already shortened to the origin on the server. */
+.notify-target {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(0, auto) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+}
+.notify-target:hover { background: var(--surface-hover); border-radius: 6px; }
+.notify-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notify-target-summary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notify-target-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 30px so the two buttons stay apart under a thumb - the row itself is
+     as low as the protected list's. */
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background var(--dur), color var(--dur);
+}
+.notify-target-action:hover { background: var(--surface-hover); color: var(--text); }
+.notify-target-action.sent { color: var(--accent); border-color: var(--accent); }
+.notify-target-action.failed { background: var(--danger-soft); color: var(--danger); }
+.notify-add { padding: 8px 8px 2px; }
+/* One choice out of a few, side by side. Named for the shape rather than
+   for the notification targets it was built for - the project settings pick
+   their level with the same control. */
+.segmented { display: flex; gap: 6px; }
+.segmented .palette-item {
+  flex: 1 1 0;
+  justify-content: center;
+  padding: 9px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.segmented .palette-item[data-active="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 85%, var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--text);
+}
+.notify-fields { display: flex; flex-direction: column; gap: 6px; }
+/* Indented under its row, so an open form reads as belonging to it rather
+   than to the list. */
+.notify-edit { margin: 2px 8px 8px; padding-left: 8px; border-left: 2px solid var(--border); }
+.notify-edit input { font-size: 12px; }
+.notify-target-action.open { background: var(--surface-hover); color: var(--text); }
+/* The fields carry no labels of their own - same as the folder form. Muted
+   instead of the browser default, which sat near invisible on the dark
+   surface. */
+.notify-add input::placeholder { color: var(--text-muted); }
+.notify-error { margin: 0 2px; color: var(--danger); font-size: 11px; }
+
+.manage-dialog {
+  width: min(560px, calc(100vw - 24px));
+  /* Fixed height instead of an upper bound: otherwise the window jumped
+     to the height of whatever content was current on every tab switch,
+     and the tab row moved out from under the finger.
+
+     Measured against `--app-height`, not `vh`: when typing into the
+     project and account fields, the on-screen keyboard slides over the
+     page without `vh` noticing anything of it (see .app above). */
+  height: min(calc(var(--app-height, 100dvh) * 0.8), 720px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--glass-floating);
+  overflow: hidden;
+}
+/* The three-row layout - head, tabs, content - carries the fixed height:
+   the content gets whatever's left over, and scrolls on its own.
+
+   Only in the open state: <dialog> toggles its visibility via `display`,
+   a `display: flex` without this condition showed the window
+   permanently. */
+.manage-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.manage-head,
+.manage-tabs { flex: 0 0 auto; }
+
+/* ::backdrop comes from the browser as soon as the window is opened via
+   showModal() - the darkened background doesn't need to be built by
+   hand. */
+.manage-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.manage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.manage-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px;
+  border-radius: 8px;
+}
+.manage-close:hover { color: var(--text); background: var(--surface-hover); }
+/* Tabs in the settings window. Horizontally scrollable instead of
+   wrapping: four tabs don't fit side by side on mobile, and a second row
+   would cost height the content needs. */
+.manage-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.manage-tabs::-webkit-scrollbar { display: none; }
+.manage-tab {
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  transition: color var(--dur), border-color var(--dur);
+}
+.manage-tab:hover { color: var(--text); }
+.manage-tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.manage-pane[hidden] { display: none; }
+
+.manage-body {
+  flex: 1 1 auto;
+  min-height: 0; /* otherwise the flex child grows beyond its share */
+  padding: 12px 14px 16px;
+  overflow-y: auto;
+}
+/* The blocks still carry their sidebar spacing: there, a line separated
+   them from the rest of the narrow column, here the window frame takes
+   over that job. Since both now sit in their own tabs, there's also
+   nothing left between them to separate - a line above the first element
+   of a tab separated it from nothing. */
+.manage-body .add-project,
+.manage-body .accounts-panel {
+  padding: 0;
+  margin: 0;
+  border-top: 0;
+}
+
+/* Row shape of the management lists - shared between projects and
+   accounts, so both tabs look alike and don't drift apart. */
+.manage-list { display: flex; flex-direction: column; gap: 2px; }
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+.manage-row:hover { background: var(--surface-2); }
+.manage-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.manage-name { font-size: 12.5px; color: var(--text); }
+/* The path runs past the row on mobile - truncate instead of wrapping,
+   otherwise the row becomes two lines and the list looks restless. */
+.manage-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The row leads into the project's settings, so it is a button - not a div
+   with a click handler, which would answer neither Enter nor Space. Its
+   hover comes from .manage-row, which it also carries. */
+.manage-row-link {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+/* The back arrow rotated: one icon serves both directions. */
+.manage-chevron {
+  transform: rotate(180deg);
+  opacity: 0.5;
+  flex: 0 0 auto;
+}
+.manage-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+/* The first visible <select> in this UI: the two older ones lie invisibly
+   over an account chip. Left to the browser it arrives in its own colours,
+   which on a dark surface means a white box. */
+.settings-select {
+  appearance: none;
+  -webkit-appearance: none;
+  margin-left: auto;
+  max-width: 60%;
+  padding: 6px 28px 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-ui);
+  cursor: pointer;
+}
+.settings-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* `appearance: none` takes the arrow with it, so the row draws its own. As
+   a mask rather than a background image: a mask takes its colour from
+   background-color and follows the theme, where a data URI would have to
+   carry one baked-in tone per theme. */
+.settings-item-select { position: relative; }
+.settings-item-select::after {
+  content: "";
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translateY(-50%);
+  background-color: var(--text-muted);
+  --chevron: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.5 6 8 10.5 12.5 6" fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  -webkit-mask: var(--chevron) center / contain no-repeat;
+  mask: var(--chevron) center / contain no-repeat;
+  pointer-events: none;
+}
+/* Label above its control instead of beside it: three segments next to a
+   label leave each of them too narrow to read on the phone. */
+.settings-item-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  cursor: default;
+}
+.settings-item-stacked:hover { background: transparent; }
+.manage-action {
+  flex: 0 0 auto;
+  padding: 4px;
+}
+.manage-action:hover { color: var(--text); }
+/* Red is only for actions that remove something - the edit icon next to
+   it doesn't get it. */
+.manage-action[data-danger="true"]:hover { color: var(--danger); }
+
+/* Measurement readout from app.js, only with `?debug=viewport` in the
+   document. It sits above everything and intercepts nothing - whatever it
+   covers stays usable. */
+.viewport-debug {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre;
+  color: #7fe0a8;
+  background: rgba(0, 0, 0, 0.82);
+  pointer-events: none;
+}
+
+/* Waypoint for focus during copy and paste (see terminal.js). Deliberately
+   NOT display:none or visibility:hidden - both take away an element's
+   focusability, and that's the entire point here. Transparent and 1px in
+   size is just the remaining camouflage. */
+.focus-holder {
+  position: fixed;
+  /* Pushed out of view instead of made transparent - modeled on xterm's
+     own input field, which ttyd ships with `left: -9999em` and height 0.
+     That's exactly the field the on-screen keyboard hangs off of while
+     typing in the terminal: a setup that's proven here to be accepted by
+     iOS as a full-fledged input target. */
+  top: 0;
+  left: -9999em;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  pointer-events: none; /* reachable only via focus(), never by tapping */
+}
+
+.toast {
+  /* absolute inside .terminal-wrap instead of fixed to the screen - why
+     is documented on the element in index.html. */
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: 10px;
+  padding: 11px 15px;
+  font-size: 12.5px;
+  box-shadow: var(--glass-floating);
+  /* Sits inside .terminal-wrap, i.e. over terminal text - here the blur
+     smudges real content and actually contributes something (unlike in
+     the sidebar). */
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--dur), transform var(--dur);
+  pointer-events: none;
+  max-width: 300px;
+  z-index: 30;
+}
+.toast[data-visible="true"] { opacity: 1; transform: translateY(0); }
+
+/* ---------- Entire sidebar collapsible (desktop) ----------
+   In addition to the per-project accordion that already existed, the
+   WHOLE sidebar can now also be collapsed (more room for the terminal).
+   Only .sidebar-body folds away, .sidebar-head (wordmark + both toggle
+   buttons) stays in place as a permanently visible narrow strip - it can
+   be expanded again at any time via that strip (permanently visible
+   toggle button). Deliberately a data-sidebar attribute independent of
+   the mobile view rather than the existing data-view: "whole sidebar
+   present/gone" is already covered by data-view on narrow screens (see
+   media query below) - the toggle button therefore stays hidden there, so
+   as not to offer two mechanisms for the same thing. */
+.app[data-sidebar="collapsed"] .shell { grid-template-columns: 60px 1fr; }
+.app[data-sidebar="collapsed"] .sidebar-body { display: none; }
+.app[data-sidebar="collapsed"] .sidebar-head { flex-direction: column; padding: 10px 6px; }
+.app[data-sidebar="collapsed"] .sidebar-head-actions { flex-direction: column; }
+.app[data-sidebar="collapsed"] .wordmark { display: none; }
+
+/* The narrow strip carries whatever justifies the space: running sessions
+   and favorites. When expanded, the sidebar has its list for that
+   instead, where it would be duplicated. */
+.sidebar-rail { display: none; }
+.app[data-sidebar="collapsed"] .sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 6px;
+}
+/* Only the middle zone scrolls: search at the top and settings at the
+   bottom stay reachable, even when many sessions are running. */
+.rail-zones {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.rail-zones::-webkit-scrollbar { display: none; }
+.rail-separator {
+  width: 22px;
+  height: 1px;
+  flex: 0 0 auto;
+  background: var(--border);
+}
+.rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  font-size: 13px;
+}
+.rail-btn svg { display: block; }
+.rail-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.rail-tile[data-active="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 84%, var(--accent));
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* The same state as in the session row, just moved to the corner of the
+   tile - there's no room for a dedicated column for it in 40px. */
+.rail-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+/* The tile has no title and therefore no cone of light - here the pulse is
+   the busy signal. Only for `working`: `live` is the fallback for a carrier
+   the registry knows nothing about. */
+.rail-dot[data-state="live"] { background: var(--live); }
+.rail-dot[data-state="working"] { background: var(--live); animation: pulse 2.4s ease-in-out infinite; }
+.rail-dot[data-state="waiting"] { background: var(--waiting); }
+
+/* ---------- Mobile: sidebar/panel exclusive instead of side by side, with
+   a back button in the panel header. Hiding the sidebar alone leaves no way
+   back - for actually using this from a phone that is a step backward.
+   ---------- */
+@media (max-width: 720px) {
+  .shell,
+  .app[data-sidebar="collapsed"] .shell { grid-template-columns: 1fr; }
+  .app[data-view="sidebar"] .panel { display: none; }
+  /* Alone on the screen: the right-hand spacing doesn't come from the
+     terminal here, the surface needs it on its own. */
+  .sidebar { margin-right: 8px; }
+  .app[data-view="panel"] .sidebar { display: none; }
+  .back-btn { display: flex; }
+  /* A desktop feature (see above) - on mobile, data-view already handles
+     exclusively showing/hiding the sidebar via the existing back button, a
+     second toggle mechanism would only be confusing. */
+  .sidebar-toggle { display: none; }
+  .app[data-sidebar="collapsed"] .sidebar-body { display: flex; }
+  /* On mobile, data-view handles showing and hiding the whole sidebar; a
+     narrow strip alongside it would be a second mechanism for the same
+     thing. */
+  .app[data-sidebar="collapsed"] .sidebar-rail { display: none; }
+
+  /* Narrower inner padding on mobile: ever since the message got card
+     form, its 8px outer margin and 14px inner padding add up to 22px per
+     side - on a ~390px-wide device that takes more away from the
+     message's text than the spacing contributes. */
+  .auth-banner { padding-left: 10px; padding-right: 10px; }
+  /* No bottom spacing: the key bar follows directly below it and brings
+     its own inner padding along. */
+  .terminal-wrap { margin-bottom: 0; }
+  /* No hover on mobile: the bar has to be readable without approach, but
+     stays dimmed so it doesn't cover the terminal. The buttons dim
+     further on top of that, just like in the idle state (0.95 x 0.79 ~
+     0.75). */
+  .panel-overlay .overlay-group { opacity: 0.95; }
+  .overlay-group .mode-switch,
+  .overlay-group .overlay-menu-btn { opacity: 0.79; }
+  .panel-overlay .overlay-btn { opacity: 0.8; }
+  .keybar { padding-left: 8px; padding-right: 8px; }
+}
+
+/* ---------- File view ----------
+   The files tab, in place ever since the view started coming from our own
+   server (see public/js/files.js). It sits in the same spot as the
+   terminal and scrolls internally: the page itself must not grow, or the
+   layout shifts around on mobile. */
+.files-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  /* Room for the floating overlay bar (back, tab switcher, account pill),
+     which stays in place in the files tab too. The 8px is its spacing
+     from the edge (.panel-overlay { top: 8px }). */
+  padding-top: calc(var(--overlay-height) + 8px);
+}
+
+/* The two columns of the files tab. They permanently exist side by side;
+   which one is visible is decided by the screen width. */
+.file-tree,
+.file-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  /* No room for two columns: the list and the file take turns replacing
+     each other, as before. data-file-view is set by js/files.js. */
+  .files-panel[data-file-view="list"] .file-main,
+  .files-panel[data-file-view="file"] .file-tree { display: none; }
+}
+
+@media (min-width: 721px) {
+  /* The actual point of the wide view: the list stays put while the file
+     changes on the right. clamp instead of a fixed width - in a narrow
+     window, 320px is half the surface. */
+  .file-tree {
+    flex: 0 0 clamp(210px, 26%, 320px);
+    border-right: 1px solid var(--border);
+  }
+  /* The list sits right next to it, so a back arrow would point at
+     something already visible anyway. The button remains and clears the
+     right column. */
+  .file-back-arrow { display: none; }
+}
+
+/* While editing, the list next to it is dead: clicking another file would
+   silently discard the change - the same rationale as for the missing
+   back button in edit mode (see js/files.js). The way out is via cancel
+   or save. */
+.files-panel[data-editing="true"] .file-tree {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.file-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.file-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 8px; /* space between the header and the first card */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.file-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.file-breadcrumbs::-webkit-scrollbar { display: none; }
+.file-breadcrumbs button {
+  border: 0;
+  background: transparent;
+  padding: 4px 2px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.file-breadcrumbs button[data-current="true"] { color: var(--text); }
+.breadcrumb-separator { color: var(--text-muted); padding: 0 2px; }
+
+.file-btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.file-btn-icon-only {
+  /* Thumb-friendly and still narrow: square instead of wide text.
+     min-width instead of width, because the Markdown toggle needs more
+     room for "</>" than an icon does. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 30px;
+  padding: 4px 6px;
+}
+.btn-icon { display: block; }
+.file-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.file-btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+.file-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 4px 2px;
+  color: var(--accent);
+  font-size: 14px;
+  text-align: left;
+}
+.file-title {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cards instead of separator lines - the same language as the session
+   list, for the same reason: a list of horizontal 1px lines reads like a
+   table. Fill is calculated against --surface, the background of
+   .files-panel; the edge itself is dropped, same as .session-row - the
+   shadow alone separates the row from the panel underneath. */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Explicit 0, not just an absent declaration: the row is a <button>, and
+     without this the browser's own UA-stylesheet border shows through
+     where the drawn border used to sit on top of it (see .session-row). */
+  border: 0;
+  border-radius: 9px;
+  /* Side spacing as margin, because .file-content also carries other
+     content - as padding on the container, the editor and the image would
+     have shifted along with it. The width is therefore explicit: a
+     <button> shrinks to fit its content with `auto`, even as a flex
+     container. */
+  margin: 0 8px 6px;
+  width: calc(100% - 16px);
+  background: var(--surface); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
+  box-shadow: var(--glass-card);
+  /* Generous, for the thumb. */
+  padding: 12px;
+  text-align: left;
+  transition: background var(--dur);
+}
+.file-row:hover {
+  background: var(--surface-hover); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 84%, var(--text));
+}
+/* Which row is the file currently open on the right. Only became a
+   question at all with the two-column view - before that, the list was
+   gone as soon as a file was open. No border left to carry an accent edge
+   (see .session-row[data-active]) - the fill alone marks the row. */
+.file-row[data-active-entry="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
+}
+.file-row[data-active-entry="true"] .file-name { color: var(--accent); font-weight: 600; }
+.file-icon { flex: 0 0 auto; color: var(--text-muted); }
+.file-row[data-file-kind="folder"] .file-icon { color: var(--accent); }
+.file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.file-size {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.file-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px 12px 8px;
+  margin: 0;
+}
+.file-error {
+  margin: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  box-shadow: var(--glass-button);
+  font-size: 13px;
+}
+.file-content > .file-btn { margin: 0 12px 12px; }
+
+.file-image {
+  display: block;
+  max-width: calc(100% - 24px);
+  /* Minus its own margin: otherwise the image would mathematically fit
+     the area and still push it into scrolling. */
+  max-height: calc(100% - 24px);
+  margin: 12px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-color: color-mix(in srgb, var(--text) 16%, transparent);
+  box-shadow: var(--glass-button);
+}
+
+/* ---------- Editing ----------
+   A monospace text field, not an editor with bracket auto-completion: the
+   purpose is a typo fix, a line of config, a note in a checklist. */
+.file-editor { display: flex; flex-direction: column; }
+.file-editor-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.file-textarea {
+  width: calc(100% - 24px);
+  margin: 0 12px 12px;
+  /* Against --app-height instead of vh: while typing, the on-screen
+     keyboard squeezes the viewport, vh would stay stuck at the old
+     value. */
+  min-height: calc(var(--app-height, 100dvh) * 0.5);
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  /* Recessed like .search-input - rationale is documented there. */
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.file-conflict {
+  margin: 12px 12px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  box-shadow: var(--glass-button);
+  font-size: 13px;
+}
+.file-conflict p { margin: 0 0 8px; }
+.file-conflict .file-editor-bar { padding: 0; flex-wrap: wrap; }
+
+/* ---------- Source code ----------
+   Line numbers and line wrapping together require one element per line
+   (see fileRender.js). The number lives in a CSS counter and therefore
+   doesn't get copied along with the text; the renderer sets
+   --number-column based on the line count. */
+.code-wrapper { padding: 4px 0 12px; }
+.code-block {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.code-block code { display: block; counter-reset: line; }
+.code-line {
+  display: grid;
+  grid-template-columns: var(--number-column, 3ch) 1fr;
+  column-gap: 12px;
+  counter-increment: line;
+}
+.code-line::before {
+  content: counter(line);
+  color: var(--text-muted);
+  opacity: 0.65;
+  text-align: right;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.code-content {
+  /* Wrapping instead of scrolling sideways - on mobile that's the
+     difference between readable and unreadable. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1.55em;
+}
+/* Target of a terminal path click with a :line suffix (see
+   terminalLinks.js and files.js' scrollToLine()). A class, not a permanent
+   state - js/files.js removes it again after a couple of seconds, since
+   nothing else would clear it before the next file lands on top of it. */
+.line-highlight {
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
+  transition: background 1.5s ease;
+}
+.source-view {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+/* ---------- Markdown ---------- */
+.markdown-body {
+  padding: 12px 14px 24px;
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin: 1.4em 0 0.5em;
+  line-height: 1.3;
+}
+.markdown-body h1 { font-size: 1.5em; }
+.markdown-body h2 { font-size: 1.28em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.markdown-body h3 { font-size: 1.12em; }
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body p, .markdown-body ul, .markdown-body ol { margin: 0 0 1em; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.4em; }
+.markdown-body li { margin-bottom: 0.3em; }
+.markdown-body a { color: var(--accent); }
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+.markdown-body pre {
+  margin: 0 0 1em;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+.markdown-body pre code { padding: 0; background: transparent; font-size: 12.5px; }
+.markdown-body blockquote {
+  margin: 0 0 1em;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+.markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.markdown-body img { max-width: 100%; border-radius: 6px; }
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0 0 1em;
+  display: block;
+  overflow-x: auto;
+  font-size: 13px;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: left;
+}
+.markdown-body th { background: var(--surface-2); }
+
+/* ---------- Syntax highlighting colors ----------
+   Custom variables instead of one of the bundled highlight.js themes: the
+   classes come from the server, but the colors should follow light/dark
+   just like the rest of the interface. Same order as for the palette
+   above - the explicit choice via data-theme comes last. */
+:root {
+  --hl-keyword: #a626a4;
+  --hl-string: #4a8a3f;
+  --hl-comment: #8d919a;
+  --hl-number: #986801;
+  --hl-title: #3d6fd6;
+  --hl-type: #b07a1a;
+  --hl-variable: #c0392b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hl-keyword: #c678dd;
+    --hl-string: #98c379;
+    --hl-comment: #7f848e;
+    --hl-number: #d19a66;
+    --hl-title: #61afef;
+    --hl-type: #e5c07b;
+    --hl-variable: #e06c75;
+  }
+}
+:root[data-theme="dark"] {
+  --hl-keyword: #c678dd;
+  --hl-string: #98c379;
+  --hl-comment: #7f848e;
+  --hl-number: #d19a66;
+  --hl-title: #61afef;
+  --hl-type: #e5c07b;
+  --hl-variable: #e06c75;
+}
+:root[data-theme="light"] {
+  --hl-keyword: #a626a4;
+  --hl-string: #4a8a3f;
+  --hl-comment: #8d919a;
+  --hl-number: #986801;
+  --hl-title: #3d6fd6;
+  --hl-type: #b07a1a;
+  --hl-variable: #c0392b;
+}
+
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag,
+.hljs-meta, .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute,
+.hljs-meta .hljs-string { color: var(--hl-string); }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link { color: var(--hl-number); }
+.hljs-title, .hljs-section, .hljs-name, .hljs-selector-id,
+.hljs-selector-class, .hljs-function .hljs-title { color: var(--hl-title); }
+.hljs-type, .hljs-built_in, .hljs-class .hljs-title,
+.hljs-params, .hljs-attr { color: var(--hl-type); }
+.hljs-variable, .hljs-template-variable, .hljs-deletion,
+.hljs-tag, .hljs-property { color: var(--hl-variable); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* ---------- Text view for selecting and the copy menu ----------
+   On mobile there's no path into tmux' copy mode (see js/copyText.js).
+   The terminal content is shown here as plain text, so the device's own
+   text selection works. */
+.copy-text-panel {
+  /* Covers the terminal instead of hiding it - a display change on the
+     iframe costs xterm a reflow. The key bar stays free, closing happens
+     through it. */
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  /* From 721px up, the key bar is hidden (see .keybar), and the only path
+     to this view there is via the ···-menu in the floating bar -
+     "inset: 0" sits directly over that and buried the menu along with the
+     tab switcher with no way out except a reload. From this width on, the
+     view therefore starts below the bar instead of at 0 (see media query
+     below); below 721px inset:0 remains, since the key bar outside
+     .terminal-wrap is reachable there anyway. */
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  /* Noticeably larger than in the terminal (11px on mobile): there the
+     column count matters, here readability does - the text wraps anyway. */
+  font-size: 15px;
+  line-height: 1.5;
+  /* Wrapping instead of scrolling sideways: a 100-character-wide line
+     would otherwise only be reachable by swiping on mobile - right in the
+     middle of selecting text. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* The actual point of this view. -webkit- for older iOS versions. */
+  -webkit-user-select: text;
+  user-select: text;
+}
+@media (min-width: 721px) {
+  /* 8px is the bar's existing spacing from the edge (.panel-overlay { top:
+     8px }) - the same calculation as for .files-panel further up, so both
+     views start below the same edge. */
+  .copy-text-panel { top: calc(var(--overlay-height) + 8px); }
+}
+
+/* Only carries the anchor point for the menu - see index.html. */
+.keybar-wrap { position: relative; flex: 0 0 auto; }
+.copy-menu {
+  /* Anchored to the bar instead of the viewport: `bottom: 100%` attaches
+     the menu directly above the key bar, without needing to know its
+     height. A viewport anchor would sit underneath the on-screen keyboard
+     on mobile. */
+  position: absolute;
+  bottom: 100%;
+  right: 8px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 190px;
+  margin-bottom: 6px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+.copy-menu[hidden] { display: none; }
+.copy-menu button {
+  /* Generously tall: this is purely a thumb target. */
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+}
+.copy-menu button:hover { background: var(--surface-hover); }
+.copy-menu-status {
+  padding: 2px 12px 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.copy-menu-status:empty { display: none; }
+
+/* Web push activation. Sits above the target list, because activating is the
+   first thing somebody does here and the list is the result. */
+.push-activation {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Thumb-high and full width: on the phone this is the one control in this
+   section that actually gets pressed. */
+.push-activation .btn-accent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.push-activation .settings-hint {
+  margin: 0;
+}
+
+/* Session lifetime and password, in the Access tab. The lifetime picker
+   follows .palette-item: one choice out of a fixed set, marked by its own
+   fill rather than an accent-colored edge. */
+.ttl-list { display: flex; flex-direction: column; gap: 2px; }
+.ttl-item {
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-ui);
+  text-align: left;
+  transition: background var(--dur);
+}
+.ttl-item:hover { background: var(--surface-hover); }
+.ttl-item[data-active="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
+}
+.access-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px;
+}
+.access-form input {
+  padding: 8px 10px;
+  font: inherit;
+  font-size: var(--fs-ui);
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+/* iOS Safari zooms into a field whose text is smaller than 16px and stays
+   zoomed after leaving it - the page then sits offset until it is scrolled
+   back by hand. 16px is the threshold, not a design choice.
+
+   Only on touch pointers, so the fields keep the size of the interface
+   around them on the desktop. The three selectors below set a size of their
+   own; without naming them here, their specificity would win. */
+@media (pointer: coarse) {
+  input, textarea, select,
+  .notify-edit input,
+  .access-form input,
+  .file-textarea { font-size: 16px; }
+}

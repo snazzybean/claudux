@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+  <title>Claudux</title>
+  <!-- Absolute, not relative: the gate serves this page under whatever url
+       was requested, so a relative href would point nowhere on /a/b/c. -->
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#12151b" />
+  <script>
+    // Before first paint, so the page does not flash the default palette
+    // first. Same keys app.js writes.
+    try {
+      const theme = localStorage.getItem('claudux-theme');
+      const palette = localStorage.getItem('claudux-palette');
+      if (theme) document.documentElement.dataset.theme = theme;
+      if (palette) document.documentElement.dataset.palette = palette;
+    } catch { /* private mode without storage - the defaults do */ }
+  </script>
+  <style>
+    .login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: var(--bg);
+    }
+    .login-card {
+      width: 100%;
+      max-width: 340px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      box-shadow: var(--glass-card);
+      padding: 24px;
+    }
+    .login-card h1 {
+      margin: 0 0 4px;
+      font-size: 20px;
+      color: var(--text);
+    }
+    .login-lead {
+      margin: 0 0 20px;
+      font-size: var(--fs-ui);
+      color: var(--text-muted);
+    }
+    .login-card label {
+      display: block;
+      font-size: var(--fs-meta);
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .login-card input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: var(--fs-body);
+      color: var(--text);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+    }
+    .login-submit {
+      width: 100%;
+      padding: 11px;
+      font: inherit;
+      font-size: var(--fs-body);
+      color: var(--on-accent);
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-md);
+      cursor: pointer;
+    }
+    .login-submit:disabled { opacity: 0.6; cursor: default; }
+    /* Same threshold as in styles.css: below 16px iOS Safari zooms into the
+       field on focus and stays zoomed. Repeated here because this page must
+       hold up on its own. */
+    @media (pointer: coarse) {
+      .login-card input { font-size: 16px; }
+    }
+    .login-error {
+      margin: 0 0 14px;
+      font-size: var(--fs-ui);
+      color: var(--danger);
+      min-height: 1em;
+    }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <h1>Claudux</h1>
+    <p class="login-lead" id="lead">Sign in to continue.</p>
+    <form id="form" autocomplete="on">
+      <!-- Hidden but present: without a username field the keychain on iOS
+           offers neither to fill nor to save the password. -->
+      <input type="text" name="username" value="claudux" autocomplete="username"
+             hidden aria-hidden="true" />
+      <label for="password" id="passwordLabel">Password</label>
+      <input type="password" id="password" name="password"
+             autocomplete="current-password" required />
+      <div id="repeatRow" hidden>
+        <label for="repeat">Repeat password</label>
+        <input type="password" id="repeat" name="repeat" autocomplete="new-password" />
+      </div>
+      <p class="login-error" id="error" role="alert"></p>
+      <button type="submit" class="login-submit" id="submit">Sign in</button>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById('form');
+    const password = document.getElementById('password');
+    const repeat = document.getElementById('repeat');
+    const repeatRow = document.getElementById('repeatRow');
+    const errorEl = document.getElementById('error');
+    const submit = document.getElementById('submit');
+    const lead = document.getElementById('lead');
+    let setupMode = false;
+
+    async function readState() {
+      try {
+        const res = await fetch('/access/state');
+        const body = await res.json();
+        setupMode = body.configured === false;
+      } catch {
+        setupMode = false;
+      }
+      if (!setupMode) return;
+      lead.textContent = 'Choose a password for this installation.';
+      document.getElementById('passwordLabel').textContent = 'New password';
+      password.setAttribute('autocomplete', 'new-password');
+      repeatRow.hidden = false;
+      repeat.required = true;
+      submit.textContent = 'Set password';
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorEl.textContent = '';
+      if (setupMode && password.value !== repeat.value) {
+        errorEl.textContent = 'The two passwords do not match.';
+        return;
+      }
+      submit.disabled = true;
+      try {
+        const res = await fetch(setupMode ? '/access/setup' : '/access/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: password.value }),
+        });
+        if (res.ok) {
+          // The url is already the destination the gate intercepted - there
+          // is nowhere to navigate to.
+          location.reload();
+          return;
+        }
+        const body = await res.json().catch(() => ({}));
+        errorEl.textContent = body.error || 'Wrong password.';
+      } catch {
+        errorEl.textContent = 'The server did not answer.';
+      }
+      submit.disabled = false;
+      password.value = '';
+      password.focus();
+    });
+
+    readState();
+  </script>
+</body>
+</html>

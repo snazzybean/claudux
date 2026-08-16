@@ -1,0 +1,18 @@
+node_modules/
+.env
+.local/
+data/
+*.log
+/test-*.txt
+/temp-*
+
+# Local working documents, not part of the published project.
+CLAUDE.md
+TODO.md
+GITHUB-READINESS.md
+OPEN-DECISIONS.md
+
+# Agent-local state. Listed here rather than left to a global ignore file,
+# so the repo carries the rule itself.
+.claude/
+.superpowers/

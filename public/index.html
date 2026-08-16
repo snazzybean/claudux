@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <!-- `interactive-widget=resizes-content` shrinks the layout viewport along
+       with the keyboard, so there's nothing left to pan the visible area
+       around in. Unknown values are ignored - the touchmove guard in app.js
+       covers those browsers. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+  <title>Claudux</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#12151b" />
+  <!-- iOS sometimes doesn't reliably read start_url/display from the
+       manifest, so the classic Apple meta tags/icon are added too, for the
+       "Add to Home Screen" flow in Safari. "black" instead of
+       "black-translucent", because styles.css doesn't reserve an
+       env(safe-area-inset-top) on the sidebar head (the wordmark moved
+       there once the topbar was removed) - translucent would otherwise
+       lay the status bar on top of it. -->
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <!-- Apply theme and palette as early as possible (before the first
+       paint), so a saved choice doesn't only become visible after app.js
+       runs (otherwise a brief flash of light mode for dark-mode users, and
+       a color jump when switching palettes). The palette name is checked
+       against its format, not against a list: that list would be a third
+       place to maintain alongside styles.css and the menu, and the value
+       only ever ends up in a data attribute anyway. -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('claudux-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.dataset.theme = saved;
+        }
+        var palette = localStorage.getItem('claudux-palette');
+        if (palette && /^[a-z]{3,20}$/.test(palette)) {
+          document.documentElement.dataset.palette = palette;
+        }
+        var bell = localStorage.getItem('claudux-term-sound');
+        if (bell === 'dark' || bell === 'palette') {
+          document.documentElement.dataset.termBell = bell;
+        }
+        if (localStorage.getItem('claudux-term-border') === 'off') {
+          document.documentElement.dataset.termBorder = 'off';
+        }
+      } catch {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="app" id="app" data-view="sidebar" data-sidebar="expanded">
+    <div class="shell">
+      <aside class="sidebar">
+        <!-- Replaces the removed, nearly-empty topbar - the wordmark moved
+             here, dark-mode and sidebar toggle right next to it. Stays
+             visible with the sidebar collapsed (see
+             .app[data-sidebar="collapsed"] in styles.css): only
+             .sidebar-body folds away, this head forms the permanently
+             visible "narrow rail" that lets the sidebar be expanded again. -->
+        <div class="sidebar-head">
+          <span class="wordmark">claudux</span>
+          <div class="sidebar-head-actions">
+            <!-- Icon as inline SVG, like everywhere in this UI (rationale
+                 in js/icons.js). app.js swaps it for the opposite direction
+                 on toggle. -->
+            <button class="btn-surface btn-glow sidebar-toggle" id="sidebarToggle" type="button" title="Expand/collapse sidebar" aria-label="Expand/collapse sidebar" aria-expanded="true"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.4 8H5.2"/><path d="M8.2 4.8 5 8l3.2 3.2"/><path d="M2.6 3.6v8.8"/></svg></button>
+          </div>
+        </div>
+        <div class="sidebar-body">
+          <div class="search-row">
+            <input class="search-input" id="searchInput" placeholder="Search projects & sessions…" />
+          </div>
+          <div class="project-list" id="projectList"></div>
+          <div class="sidebar-foot">
+            <button class="btn-surface btn-lift manage-toggle" id="manageToggle" type="button">Manage folders</button>
+            <!-- Opens the same window as the button next to it, just on a
+                 different tab. There used to be a dropdown with the
+                 settings in it here - it would have grown with every
+                 additional option, and expanded it already spanned half
+                 the sidebar with just eight palettes. -->
+            <button class="btn-surface btn-lift settings-toggle" id="settingsOpen" type="button" title="Settings" aria-label="Settings">···</button>
+          </div>
+        </div>
+        <!-- Only visible with the sidebar collapsed (see styles.css). This
+             space used to be empty; it now carries the running sessions
+             and the favorites, both as abbreviation tiles. Doesn't exist on
+             narrow screens - there data-view handles showing/hiding the
+             whole sidebar. -->
+        <div class="sidebar-rail" id="sidebarRail"></div>
+      </aside>
+      <main class="panel">
+        <!-- Text in its own element, so the close button stays put when the
+             message is set (showError writes to textContent, which would
+             otherwise clear the button away too). -->
+        <div class="error-banner" id="errorBanner" style="display:none">
+          <span id="errorBannerText"></span>
+          <button type="button" class="error-banner-close" id="errorBannerClose"
+                  aria-label="Close message" title="Close message"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="m4.2 4.2 7.6 7.6"/><path d="m11.8 4.2-7.6 7.6"/></svg></button>
+        </div>
+        <!-- Auth state of the open session in plain text. Deliberately its
+             own element next to the error-banner: that shows errors of
+             THIS UI and is cleared by clearError(); an expired login, on
+             the other hand, is a state of the session that must persist.
+             The sidebar only has an icon for it - there's no hover on the
+             phone that would show a title tooltip. -->
+        <div class="auth-banner" id="authBanner" style="display:none"></div>
+        <!-- The login terminal fills the entire area that otherwise holds
+             the sessions - without a signpost it wouldn't be clear that the
+             login continues in the window next door and that you need to
+             go back there. -->
+        <div class="login-banner" id="loginBanner" hidden>
+          <span id="loginBannerText">Login in progress</span>
+          <button class="btn-ghost" id="loginBannerBack" type="button">Back to the wizard</button>
+        </div>
+        <!-- The switcher and account sit as a semi-transparent bar OVER
+             the terminal rather than in rows below it, so the terminal
+             starts at the top edge. -->
+        <div class="terminal-wrap">
+          <div class="panel-overlay">
+            <!-- The only one on the left: it navigates, while the right
+                 side acts. Only visible on narrow screens; the spacer
+                 toward the right sits on it itself, since the group on the
+                 right already hugs the edge anyway. -->
+            <button class="overlay-btn back-btn" id="backBtn" type="button" aria-label="Back to project list"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 3.4 5.4 8 10 12.6"/></svg></button>
+            <!-- One group instead of three islands: switcher, account, and
+                 the ···-menu share a background and border. The account
+                 pill stays visible inside it - it's the anchor point for
+                 the usage popover, and it carries information, not an
+                 action. -->
+            <div class="overlay-group" id="overlayGroup">
+              <div class="mode-switch">
+                <!-- aria-label explicit: up to here the emoji itself was
+                     the accessible name of the button; an aria-hidden SVG
+                     would leave it nameless. -->
+                <button id="tabTerminal" data-active="true" title="Terminal" aria-label="Terminal"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="1.9" y="2.6" width="12.2" height="10.8" rx="1.5"/><path d="M4.7 6.6 7 8.9l-2.3 2.3"/><path d="M8.6 11.3h3"/></svg></button>
+                <button id="tabFiles" data-active="false" title="Files" aria-label="Files"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg></button>
+              </div>
+              <span class="account-badge" id="accountBadge" role="button" tabindex="0" aria-expanded="false" aria-controls="usagePopover"></span>
+              <div class="overlay-menu-wrap">
+                <button class="overlay-menu-btn" id="overlayMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="overlayMenu" aria-label="More actions" title="More actions">···</button>
+                <!-- Rare actions. "Terminal text…" with an ellipsis, because
+                     the entry opens another menu instead of acting itself:
+                     the text must be loaded before it can be copied, and
+                     the way to close the text view leads back through this
+                     very menu. -->
+                <div class="overlay-menu" id="overlayMenu" role="menu" hidden>
+                  <button type="button" role="menuitem" id="overlayMenuRelease">Release terminal</button>
+                  <button type="button" role="menuitem" id="overlayMenuText">Terminal text…</button>
+                </div>
+              </div>
+            </div>
+            <!-- Catches a click next to it while the popover is open.
+                 Needed because .panel-overlay is pointer-events:none: a tap
+                 next to the popover used to fall all the way through into
+                 the terminal iframe, whose events never reach this
+                 document. Placed before the popover in the markup, so it
+                 sits behind it. -->
+            <div class="usage-backdrop" id="usageBackdrop" hidden></div>
+            <div class="usage-popover" id="usagePopover" role="dialog" aria-label="Usage" hidden></div>
+          </div>
+          <iframe class="terminal-frame" id="terminalFrame" title="Terminal"></iframe>
+          <!-- The file view is built in here by public/js/files.js. No
+               longer an iframe: the view comes from our own server and
+               should behave like the rest of the UI. -->
+          <div class="files-panel" id="filesPanel" style="display:none"></div>
+          <!-- Text view for selecting. It covers the terminal instead of
+               hiding it: a display change on the iframe costs xterm a
+               reflow, and the keyboard bar below must stay reachable -
+               closing runs through it. -->
+          <pre class="copy-text-panel" id="copyTextPanel" aria-label="Terminal text for selecting" hidden></pre>
+          <!-- The toast sits INSIDE the terminal area, not at the document
+               edge: as `position: fixed` at the bottom of the screen it
+               used to sit under the on-screen keyboard on the phone and was
+               never visible (the same trap that --app-height solves for
+               the terminal and keyboard bar, see app.js). .terminal-wrap
+               follows the visible height along with it. -->
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        </div>
+        <!-- Keyboard bar for use without a real keyboard; hidden from
+             721px up (see styles.css). The set of keys is what Claude
+             Code needs and the on-screen keyboard doesn't already
+             provide. -->
+        <!-- The wrapper only carries the anchor point for the copy menu: this
+             way it's guaranteed to sit directly above the bar, without
+             knowing its height and without depending on the viewport -
+             which would sit under the on-screen keyboard on the phone
+             otherwise. -->
+        <div class="keybar-wrap">
+        <!-- Flyout menu on the copy button. At the bottom instead of the
+             top, because that's where the thumb is; "Copy all" works this
+             way without even opening the text view. -->
+        <div class="copy-menu" id="copyMenu" role="menu" hidden>
+          <button type="button" role="menuitem" id="copyMenuView">Text for selecting</button>
+          <button type="button" role="menuitem" id="copyMenuAll">Copy all</button>
+          <button type="button" role="menuitem" id="copyMenuVersion" aria-pressed="false">View: Clean</button>
+          <button type="button" role="menuitem" id="copyMenuClose">Close</button>
+          <span class="copy-menu-status" id="copyMenuStatus" role="status" aria-live="polite"></span>
+        </div>
+        <div class="keybar" id="keybar" data-expanded="false">
+          <!-- No data-key: the generic handler in terminal.js binds via
+               [data-key] and would otherwise also send a key into the
+               terminal on toggle. The loop's focus guard still gets this
+               button explicitly though (see terminal.js). -->
+          <button type="button" class="icon-btn keybar-more" id="keybarMoreBtn"
+                  aria-expanded="false" aria-controls="keybar"
+                  aria-label="Show more keys"
+                  title="More keys - arrows left and right">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+              <path d="M4 10 8 6l4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="keybar-keys">
+            <button type="button" data-key="Escape">Esc</button>
+            <button type="button" data-key="Tab" data-shift="true" title="Switch working mode">⇧Tab</button>
+            <!-- Inline SVG instead of a character: an SVG doesn't depend
+                 on the device's font and takes the button's color via
+                 currentColor. -->
+            <button type="button" class="icon-btn" id="pasteBtn" aria-label="Paste" title="Paste from clipboard - an image gets uploaded and its path inserted">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                <rect x="3.2" y="3" width="9.6" height="11.2" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+                <rect x="5.9" y="1.4" width="4.2" height="2.8" rx="0.9" fill="none" stroke="currentColor" stroke-width="1.4"/>
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="copySelectionBtn" aria-label="Copy options" aria-haspopup="menu" aria-controls="copyMenu" aria-expanded="false" title="Show terminal content as text - select and copy there with your finger">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                <rect x="5.6" y="5.6" width="8.8" height="8.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M10.8 3.4H3.6A1.6 1.6 0 0 0 2 5v7.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button type="button" data-key="Tab">Tab</button>
+            <button type="button" data-key="c" data-ctrl="true">^C</button>
+            <!-- Paging is done with a finger; these two are the fallback
+                 for when swiping doesn't catch once in a while. -->
+            <button type="button" data-key="PageUp" title="Page up through the conversation">↑↑</button>
+            <button type="button" data-key="PageDown" title="Page down through the conversation">↓↓</button>
+          </div>
+          <!-- Fixed block on the right edge: the arrows used to be able to
+               wander out of the scrollable row. Expanded, they arrange
+               into an inverted T, like on a real keyboard. -->
+          <div class="keybar-arrows">
+            <button type="button" data-key="ArrowUp">↑</button>
+            <button type="button" data-key="ArrowLeft">←</button>
+            <button type="button" data-key="ArrowDown">↓</button>
+            <button type="button" data-key="ArrowRight">→</button>
+          </div>
+        </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <!-- Projects and accounts used to sit as three blocks stacked in the
+       sidebar footer and felt cluttered there. They've been moved here
+       unchanged - same ids, same handlers - and now live behind a single
+       button.
+
+       A native <dialog> instead of a hand-built overlay: Escape to close,
+       focus trap, and the dimmed background come from the browser, without
+       us having to maintain them. -->
+  <dialog class="manage-dialog" id="manageDialog">
+    <div class="manage-head">
+      <strong>Settings</strong>
+      <button class="manage-close" id="manageClose" type="button" aria-label="Close" title="Close"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="m4.2 4.2 7.6 7.6"/><path d="m11.8 4.2-7.6 7.6"/></svg></button>
+    </div>
+    <!-- Tabs instead of one long list: the sections have nothing to do with
+         each other, and "Appearance" alone now brings a dozen controls with
+         it. role/aria-selected are set because buttons without them are
+         just buttons to a screen reader - that one of them currently
+         determines the content below wouldn't be apparent otherwise.
+
+         Four tabs don't fit side by side on a phone; the bar scrolls
+         sideways (see styles.css). -->
+    <div class="manage-tabs" id="manageTabs" role="tablist">
+      <button class="manage-tab" type="button" role="tab" data-tab="appearance" aria-selected="true">Appearance</button>
+      <button class="manage-tab" type="button" role="tab" data-tab="projects" aria-selected="false">Projects</button>
+      <button class="manage-tab" type="button" role="tab" data-tab="accounts" aria-selected="false">Accounts</button>
+      <button class="manage-tab" type="button" role="tab" data-tab="sessions" aria-selected="false">Sessions</button>
+      <button class="manage-tab" type="button" role="tab" data-tab="access" aria-selected="false">Access</button>
+    </div>
+    <div class="manage-body">
+      <section class="manage-pane" data-pane="appearance">
+        <button class="settings-item" id="themeToggle" type="button">Switch light / dark</button>
+
+        <div class="settings-section">
+          <div class="settings-section-head">Color palette</div>
+          <!-- The choices are fixed in the markup instead of built from JS:
+               the colors live in styles.css anyway, and a second list in JS
+               would be one more source that can drift out of sync with it.
+               All JS sets is data-active. -->
+          <div class="palette-list" id="paletteList">
+            <button class="palette-item" type="button" data-palette="bluegray"><span class="palette-dot"></span>Blue-gray</button>
+            <button class="palette-item" type="button" data-palette="warmgray"><span class="palette-dot"></span>Warm gray</button>
+            <button class="palette-item" type="button" data-palette="neutral"><span class="palette-dot"></span>Neutral</button>
+            <button class="palette-item" type="button" data-palette="charcoal"><span class="palette-dot"></span>Charcoal</button>
+            <button class="palette-item" type="button" data-palette="moss"><span class="palette-dot"></span>Moss</button>
+            <button class="palette-item" type="button" data-palette="nightblue"><span class="palette-dot"></span>Night blue</button>
+            <button class="palette-item" type="button" data-palette="plum"><span class="palette-dot"></span>Plum</button>
+            <button class="palette-item" type="button" data-palette="sand"><span class="palette-dot"></span>Sand</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-head">Terminal</div>
+          <!-- Base tone of BOTH the border and the content. Both carry the
+               same value: previously ttyd's gray showed in the terminal and
+               a different tone in the border around it - visible whenever
+               no terminal was loaded. -->
+          <div class="palette-list" id="termBellList">
+            <button class="palette-item" type="button" data-bell="console">Console default</button>
+            <button class="palette-item" type="button" data-bell="dark">Neutral dark</button>
+            <button class="palette-item" type="button" data-bell="palette">Match the UI</button>
+          </div>
+          <label class="settings-item">
+            <input type="checkbox" id="termBorderToggle" />
+            No border
+          </label>
+          <p class="settings-hint">Removes the terminal's edge and corners, the surrounding spacing stays. Together with "Match the UI" it no longer stands out from the surface at all.</p>
+          <p class="settings-hint">The colors of the output itself remain untouched in every case - they belong to the console. On a light background they can look pale in places because of that; the two fixed tones also stay dark in light mode.</p>
+        </div>
+      </section>
+
+      <section class="manage-pane" data-pane="sessions" hidden>
+        <label class="settings-item">
+          <input type="checkbox" id="editModeToggle" />
+          Edit mode
+        </label>
+        <p class="settings-hint">Shows the lock, account choice, and the remove icon.</p>
+        <!-- Filled from the already-loaded data model when the window
+             opens (see app.js) - no separate endpoint needed for that. -->
+        <div class="settings-section">
+          <div class="settings-section-head" id="protectedHead">Protected sessions</div>
+          <div class="protected-list" id="protectedList"></div>
+        </div>
+
+        <!-- Filled by js/notifications.js when the window opens; the form
+             for a new target is built there too, because its fields depend
+             on the chosen type. -->
+        <div class="settings-section">
+          <div class="settings-section-head">Notifications</div>
+          <!-- Built by js/notifications.js: this type has nothing to type,
+               so it gets its own control instead of a row in the type
+               chooser below. -->
+          <div id="pushActivation" class="push-activation"></div>
+          <div id="notifyTargets" class="notify-targets"></div>
+          <div class="notify-add" id="notifyAddArea"></div>
+          <p class="settings-hint">A target receives a message when a session
+            finishes or asks something. Secrets are stored on the server and
+            never sent back to this page.</p>
+        </div>
+      </section>
+
+      <section class="manage-pane" data-pane="access" hidden>
+        <div class="settings-section">
+          <div class="settings-section-head">Session lifetime</div>
+          <!-- Fixed in the markup like the palette list: the values are the
+               ones the server accepts, and a second list in JS would be one
+               more place they can drift apart. JS only sets data-active. -->
+          <div class="ttl-list" id="ttlList">
+            <button class="ttl-item" type="button" data-days="7">7 days</button>
+            <button class="ttl-item" type="button" data-days="30">30 days</button>
+            <button class="ttl-item" type="button" data-days="180">6 months</button>
+            <button class="ttl-item" type="button" data-days="365">12 months</button>
+            <button class="ttl-item" type="button" data-days="">Never</button>
+          </div>
+          <p class="settings-hint">Counted from the moment a device signs in.
+            A shorter setting applies to devices that are already signed in.</p>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-head">Password</div>
+          <form class="access-form" id="passwordForm">
+            <input type="password" id="currentPassword" placeholder="Current password"
+                   autocomplete="current-password" required />
+            <input type="password" id="nextPassword" placeholder="New password"
+                   autocomplete="new-password" minlength="8" required />
+            <button class="btn-accent" type="submit">Change password</button>
+          </form>
+          <p class="settings-hint">Changing the password signs out every device,
+            this one included.</p>
+        </div>
+
+        <div class="settings-section">
+          <button class="settings-item" id="signOut" type="button">Sign out</button>
+          <button class="settings-item" id="signOutAll" type="button">Sign out all devices</button>
+        </div>
+      </section>
+
+      <section class="manage-pane" data-pane="projects" hidden>
+        <!-- The sidebar shows projects along with their sessions and is the
+             working view; management happens here - the same split as with
+             accounts. Filled from the loaded model (see app.js). -->
+        <div class="settings-section">
+          <div class="settings-section-head">Added folders</div>
+          <div class="manage-list" id="projectManageList"></div>
+        </div>
+      <div class="add-project">
+        <button class="btn-surface btn-lift add-project-toggle" id="addProjectToggle" aria-expanded="false"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 3.4v9.2"/><path d="M3.4 8h9.2"/></svg>Add folder</button>
+        <div class="add-project-form" id="addProjectForm" style="display:none">
+          <input id="newProjName" autocomplete="off" placeholder="Display name" />
+          <div class="path-row">
+            <input id="newProjPath" autocomplete="off" placeholder="/path/to/project" />
+            <button id="browseToggle" type="button" title="Browse folders" aria-label="Browse folders"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg></button>
+          </div>
+          <div class="folder-browser" id="folderBrowser" style="display:none">
+            <div class="folder-browser-path" id="folderBrowserPath"></div>
+            <div class="folder-browser-list" id="folderBrowserList"></div>
+            <button class="btn-ghost" id="folderBrowserChoose" type="button">Use this folder</button>
+          </div>
+          <button class="btn-accent" id="newProjSubmit">Add</button>
+        </div>
+      </div>
+      </section>
+
+      <section class="manage-pane" data-pane="accounts" hidden>
+      <div class="accounts-panel">
+        <div class="accounts-list" id="accountsList"></div>
+        <!-- Wizard confirmation. It sits here instead of in step 4: the
+             wizard closes once the work is done, and its message would
+             have disappeared with it - or, as long as it stayed open,
+             ended up below the visible area. -->
+        <p class="login-success" id="accountsHint" hidden></p>
+        <button class="btn-surface btn-lift accounts-toggle" id="addAccountToggle" aria-expanded="false"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 3.4v9.2"/><path d="M3.4 8h9.2"/></svg>Add account</button>
+        <!-- All four steps are always present, locked until it's their
+             turn. A wizard that only showed the current step would have no
+             way back: anyone who accidentally jumped ahead could no longer
+             reach the skipped step. Visible and locked also shows what's
+             still to come from the very start.
+
+             Claudux reads the URL and token off the login session's screen
+             (see lib/loginScreen.js), so neither has to be selected in the
+             terminal - on a phone that's its own hassle every time. If
+             detection finds nothing, the login button stays locked, and
+             the manual path below leads into the terminal. -->
+        <div class="add-account-form" id="addAccountForm" style="display:none">
+          <div class="login-step" data-step="name" data-active-entry="true">
+            <div class="login-step-header">Name</div>
+            <div class="account-name-row">
+              <!-- autocomplete="off": browsers restore form values on
+                   reload on their own. The wizard, however, starts from
+                   scratch after a reload - it no longer knows about a
+                   login in progress -, and a name that survives the page
+                   looks like a process that's still running. -->
+              <input id="newAccountName" autocomplete="off" placeholder="Name, e.g. Work" />
+              <input id="newAccountAbbr" maxlength="2" autocomplete="off" placeholder="Abbr." title="Abbreviation (optional, max. 2 characters)" />
+            </div>
+          </div>
+
+          <div class="login-step" data-step="login" data-active-entry="false">
+            <div class="login-step-header">Login</div>
+            <p class="settings-hint" id="loginFor" hidden></p>
+            <button class="btn-accent" id="startLoginSession" type="button">Start login</button>
+            <!-- The highlight sweeps through the text while waiting. The
+                 wait takes a few seconds, and a static sentence would look
+                 like a hung window during that. -->
+            <p class="login-waiting" id="loginWaiting" hidden>Preparing login …</p>
+            <!-- A real <a>, not a window.open() from a handler: the new tab
+                 belongs to the browser, a call from JS falls victim to the
+                 popup blocker on a phone. An <a> doesn't know `disabled`,
+                 hence aria-disabled and no href while the URL is missing. -->
+            <a class="btn-accent login-link" id="loginLink" role="button" aria-disabled="true" target="_blank" rel="noopener">Log in to Claude</a>
+            <p class="settings-hint login-fallback" id="loginFallback" hidden></p>
+          </div>
+
+          <div class="login-step" data-step="code" data-active-entry="false">
+            <div class="login-step-header">Code</div>
+            <p class="settings-hint">The browser shows a code after confirming. Paste it here - Claudux types it into the terminal.</p>
+            <input id="loginCode" autocomplete="off" placeholder="Code from the browser" />
+            <button class="btn-accent" id="loginCodeSend" type="button">Send</button>
+            <p class="login-waiting" id="codeWaiting" hidden>Entering code, waiting for the token …</p>
+          </div>
+
+          <div class="login-step" data-step="token" data-active-entry="false">
+            <div class="login-step-header">Done</div>
+            <p class="settings-hint" id="tokenPending">Once the token arrives, the account is saved and this wizard closes itself.</p>
+            <p class="login-waiting" id="tokenWaiting" hidden>Saving account …</p>
+            <!-- The manual path: only needed if the token might have been
+                 cut off (see lib/loginScreen.js) or if it was fetched from
+                 the terminal itself. No type="password" - then you need to
+                 be able to see it. -->
+            <div class="token-manual" id="tokenManual" hidden>
+              <p class="settings-hint" id="tokenLength"></p>
+              <input id="newAccountToken" autocomplete="off" placeholder="Paste the token from the terminal" />
+              <button class="btn-accent" id="saveAccount">Save</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      </section>
+    </div>
+  </dialog>
+  <!-- Holds focus while copy and paste run: the clipboard API needs focus
+       in the main document, and iOS only keeps the on-screen keyboard up
+       while focus moves from one editable element to the next - a
+       `window.focus()` collapses it. No `aria-hidden`, or VoiceOver goes
+       silent on the focused field; `tabindex="-1"` keeps it out of the tab
+       order. Autocorrect off, because its bar changes the keyboard's
+       height. -->
+  <input class="focus-holder" id="focusHolder" tabindex="-1"
+         aria-label="Focus waypoint"
+         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+  <!-- ES module: app.js loads its own imports. Modules run automatically
+       after the document is parsed - the script already sat at the end of
+       <body> anyway, so nothing changes about the order. -->
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
