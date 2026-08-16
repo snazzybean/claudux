@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
@@ -52,40 +52,66 @@ async function promptYesNo(rl, question) {
   return answer.trim().toLowerCase() === 'y';
 }
 
+function runInstall(cmd, { needsSudo }) {
+  const result = spawnSync(needsSudo ? 'sudo' : cmd[0], needsSudo ? cmd : cmd.slice(1), {
+    stdio: 'inherit',
+  });
+  return result.status === 0;
+}
+
+// Split out of main() so the npx entry point can check the same
+// prerequisites without also writing a .env into the npm cache.
+export async function ensurePrerequisites({
+  checkFn = binaryExists,
+  platform = process.platform,
+  confirmFn,
+  installFn = runInstall,
+  log = console.log,
+} = {}) {
+  const missing = detectMissingBinaries({ checkFn });
+  if (missing.length > 0) {
+    log(`Missing: ${missing.join(', ')}`);
+    const manager = detectPackageManager({ platform, checkFn });
+    if (manager) {
+      const cmd = installCommandFor(manager, missing);
+      if (await confirmFn(`Install with "${cmd.join(' ')}"?`)) {
+        if (!installFn(cmd, { needsSudo: manager !== 'brew' })) {
+          log('Installation failed - please install manually.');
+        }
+      } else {
+        log(`Please install manually: ${cmd.join(' ')}`);
+      }
+    } else {
+      log(`No known package manager detected - please install ${missing.join(', ')} manually.`);
+    }
+  } else {
+    log('tmux and ttyd are present.');
+  }
+
+  const claudePresent = checkFn('claude');
+  log(
+    claudePresent
+      ? 'Claude Code CLI is present.'
+      : 'Claude Code CLI not found - see https://docs.claude.com/claude-code for installation and "claude setup-token" for the account.',
+  );
+
+  try {
+    const mouseSetting = execFileSync('tmux', ['show-options', '-g', 'mouse'], { encoding: 'utf8' }).trim();
+    if (mouseSetting.includes('on')) {
+      log('Warning: tmux has "mouse on" set globally - this breaks Claudux\'s copy feature (see README, Requirements).');
+    }
+  } catch {
+    // tmux not installed, or no server yet - nothing to warn about.
+  }
+
+  return { missing, claudePresent };
+}
+
 async function main() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
     console.log(`Node: ${process.version}`);
-
-    const missing = detectMissingBinaries({ checkFn: binaryExists });
-    if (missing.length > 0) {
-      console.log(`Missing: ${missing.join(', ')}`);
-      const manager = detectPackageManager({ platform: process.platform, checkFn: binaryExists });
-      if (manager) {
-        const cmd = installCommandFor(manager, missing);
-        const install = await promptYesNo(rl, `Install with "${cmd.join(' ')}"?`);
-        if (install) {
-          const { spawnSync } = await import('node:child_process');
-          const needsSudo = manager !== 'brew';
-          const result = spawnSync(needsSudo ? 'sudo' : cmd[0], needsSudo ? cmd : cmd.slice(1), { stdio: 'inherit' });
-          if (result.status !== 0) {
-            console.error('Installation failed - please install manually.');
-          }
-        } else {
-          console.log(`Please install manually: ${cmd.join(' ')}`);
-        }
-      } else {
-        console.log(`No known package manager detected - please install ${missing.join(', ')} manually.`);
-      }
-    } else {
-      console.log('tmux and ttyd are present.');
-    }
-
-    if (!binaryExists('claude')) {
-      console.log('Claude Code CLI not found - see https://docs.claude.com/claude-code for installation and "claude setup-token" for the account.');
-    } else {
-      console.log('Claude Code CLI is present.');
-    }
+    await ensurePrerequisites({ confirmFn: (question) => promptYesNo(rl, question) });
 
     const envPath = path.join(REPO_ROOT, '.env');
     if (!fs.existsSync(envPath)) {
@@ -94,15 +120,6 @@ async function main() {
       console.log('PUBLIC_BASE_URL is commented out - set it to make notifications link back to this installation. Notification targets themselves are configured in the settings dialog, not here. CLAUDE_HOME and ACCOUNTS_SECRET_PATH are commented out too and already default sensibly.');
     } else {
       console.log('.env already exists, left untouched.');
-    }
-
-    try {
-      const mouseSetting = execFileSync('tmux', ['show-options', '-g', 'mouse'], { encoding: 'utf8' }).trim();
-      if (mouseSetting.includes('on')) {
-        console.log('Warning: tmux has "mouse on" set globally - this breaks Claudux\'s copy feature (see README, Requirements).');
-      }
-    } catch {
-      // tmux not installed, or no server yet - nothing to warn about.
     }
 
     console.log('\nDone. Continue with: npm start');

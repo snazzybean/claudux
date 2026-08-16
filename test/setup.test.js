@@ -4,6 +4,7 @@ import {
   detectMissingBinaries,
   detectPackageManager,
   installCommandFor,
+  ensurePrerequisites,
 } from '../scripts/setup.js';
 
 test('detectMissingBinaries reports only the missing names', () => {
@@ -37,5 +38,56 @@ test('installCommandFor builds the right command per package manager', () => {
   assert.deepEqual(installCommandFor('apt', ['tmux']), ['apt-get', 'install', '-y', 'tmux']);
   assert.deepEqual(installCommandFor('dnf', ['tmux']), ['dnf', 'install', '-y', 'tmux']);
   assert.deepEqual(installCommandFor('pacman', ['tmux']), ['pacman', '-S', '--noconfirm', 'tmux']);
+});
+
+test('ensurePrerequisites reports nothing missing when every binary is there', async () => {
+  const result = await ensurePrerequisites({
+    checkFn: () => true,
+    platform: 'darwin',
+    confirmFn: async () => { throw new Error('must not ask'); },
+    installFn: () => { throw new Error('must not install'); },
+    log: () => {},
+  });
+  assert.deepEqual(result.missing, []);
+  assert.equal(result.claudePresent, true);
+});
+
+test('ensurePrerequisites installs only after the question is answered yes', async () => {
+  const installed = [];
+  const result = await ensurePrerequisites({
+    checkFn: (bin) => bin !== 'ttyd',
+    platform: 'darwin',
+    confirmFn: async () => true,
+    installFn: (cmd) => { installed.push(cmd); return true; },
+    log: () => {},
+  });
+  assert.deepEqual(result.missing, ['ttyd']);
+  assert.deepEqual(installed, [['brew', 'install', 'ttyd']]);
+});
+
+test('ensurePrerequisites installs nothing when the question is answered no', async () => {
+  let called = false;
+  await ensurePrerequisites({
+    checkFn: (bin) => bin !== 'ttyd',
+    platform: 'darwin',
+    confirmFn: async () => false,
+    installFn: () => { called = true; return true; },
+    log: () => {},
+  });
+  assert.equal(called, false);
+});
+
+// A missing `claude` is reported, never installed: it is not a package the
+// system package manager knows.
+test('ensurePrerequisites reports a missing Claude Code CLI without installing it', async () => {
+  const result = await ensurePrerequisites({
+    checkFn: (bin) => bin !== 'claude',
+    platform: 'linux',
+    confirmFn: async () => { throw new Error('must not ask'); },
+    installFn: () => { throw new Error('must not install'); },
+    log: () => {},
+  });
+  assert.equal(result.claudePresent, false);
+  assert.deepEqual(result.missing, []);
 });
 
