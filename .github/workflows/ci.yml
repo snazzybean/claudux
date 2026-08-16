@@ -28,6 +28,12 @@ jobs:
       # tests use an invalid one and only require the process to stay up.
       - run: npm install -g @anthropic-ai/claude-code
 
+      # `tmux set-buffer` does not start a server, it fails without one, and
+      # the buffer route test works against the host's shared server the way
+      # the real copy feature does. Locally that server is always up; here it
+      # has to be created.
+      - run: tmux new-session -d -s ci-keepalive
+
       - run: npm ci
 
       - run: npm run lint
