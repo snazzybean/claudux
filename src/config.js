@@ -17,7 +17,10 @@ export function loadConfig(env = process.env) {
     // which resolves inside the checkout, the one place these files must
     // not be.
     claudeHome: env.CLAUDE_HOME || path.join(os.homedir(), '.claude'),
-    dataDir: env.DATA_DIR || './data',
+    // Same reasoning as the secret paths below: outside the checkout. A
+    // CWD-relative default has no meaning under `npx`, where the package
+    // lives in the npm cache and the working directory is arbitrary.
+    dataDir: env.DATA_DIR || path.join(os.homedir(), '.claudux', 'data'),
     // On unless something says otherwise. A forgotten or empty value must
     // not hand out a shell, and `EnvironmentFile=` in systemd keeps trailing
     // comments, so an empty value is a case that actually occurs.

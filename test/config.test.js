@@ -19,6 +19,18 @@ test('loadConfig returns defaults when no env vars are set', () => {
   assert.equal(cfg.publicBaseUrl, '');
 });
 
+// Not './data': under `npx` there is no checkout to be relative to, and a
+// CWD-relative default would scatter project lists across whatever
+// directory the user happened to start in.
+test('loadConfig defaults dataDir next to the other per-installation files', () => {
+  assert.equal(loadConfig({}).dataDir, path.join(os.homedir(), '.claudux', 'data'));
+});
+
+test('loadConfig keeps an explicit DATA_DIR, including the checkout-relative one', () => {
+  assert.equal(loadConfig({ DATA_DIR: './data' }).dataDir, './data');
+  assert.equal(loadConfig({ DATA_DIR: '/var/lib/claudux/data' }).dataDir, '/var/lib/claudux/data');
+});
+
 test('loadConfig picks up set env vars', () => {
   const cfg = loadConfig({ PORT: '5000', PUBLIC_BASE_URL: 'https://example.test' });
   assert.equal(cfg.port, 5000);
