@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -17,10 +18,15 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # tmux only. Several tests drive a real tmux server, but ttyd and the
-      # Claude Code CLI are never spawned: ttydManager.start() takes an
-      # injected spawnFn and authStatus.js runs no binary at all.
+      # ttyd is never spawned - ttydManager.start() takes an injected
+      # spawnFn - so only tmux needs installing here.
       - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      # The route tests start real tmux sessions, and scripts/claude-session.sh
+      # runs `claude` in them: without the binary the pane dies at once and
+      # every such test waits out its precondition. No token is needed - the
+      # tests use an invalid one and only require the process to stay up.
+      - run: npm install -g @anthropic-ai/claude-code
 
       - run: npm ci
 
