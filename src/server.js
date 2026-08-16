@@ -146,8 +146,9 @@ function guardOrExit(config) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const config = loadConfig();
+// Named rather than inline under the argv check: bin/claudux.js starts the
+// server too, and there `process.argv[1]` is the bin script, not this file.
+export function startServer(config = loadConfig()) {
   guardOrExit(config);
   // Token handoff files are only valid between session start and wrapper
   // start (see sessionTokenFile.js). After a restart, no session is
@@ -198,4 +199,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   process.on('SIGINT', () => { shutdown(); });
   process.on('SIGTERM', () => { shutdown(); });
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  startServer();
 }

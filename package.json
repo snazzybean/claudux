@@ -20,6 +20,9 @@
   },
   "homepage": "https://github.com/snazzybean/claudux#readme",
   "private": true,
+  "bin": {
+    "claudux": "bin/claudux.js"
+  },
   "type": "module",
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
