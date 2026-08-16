@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # tmux only. Several tests drive a real tmux server, but ttyd and the
+      # Claude Code CLI are never spawned: ttydManager.start() takes an
+      # injected spawnFn and authStatus.js runs no binary at all.
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # Runs through scripts/run-tests.sh, which keeps --test-concurrency=1.
+      # Do not raise it: the suite starts real tmux sessions.
+      - run: npm test
