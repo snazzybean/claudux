@@ -8,7 +8,7 @@ import { tokenFromEnv, parsePaneList, resolveActiveAccounts } from '../src/lib/a
 
 test('tokenFromEnv reads CLAUDE_CODE_OAUTH_TOKEN from a /proc/<pid>/environ content', () => {
   // environ is NUL-separated, not line-separated.
-  // 'sk-test-token' is on the pre-push guard's allow-list; the value is
+  // 'sk-test-token' has no resemblance to a real token shape; the value is
   // arbitrary, the parsing is what's under test.
   const raw = ['PATH=/usr/bin', 'CLAUDE_CODE_OAUTH_TOKEN=sk-test-token', 'TERM=xterm'].join('\0');
 
@@ -58,8 +58,8 @@ test('parsePaneList handles empty output (no tmux server)', () => {
   assert.deepEqual(parsePaneList(''), []);
 });
 
-// Both fixture values sit on the pre-push guard's allow-list; anything else
-// after CLAUDE_CODE_OAUTH_TOKEN= would be blocked.
+// Both fixture values are deliberately unlike a real token shape - what is
+// under test is the three-way distinction, not the value.
 test('resolveActiveAccounts tells the three states apart', async () => {
   const resolver = (token) => (token === 'sk-test-token' ? 'id-1' : null);
   const map = await resolveActiveAccounts(resolver, {

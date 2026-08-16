@@ -16,3 +16,9 @@ OPEN-DECISIONS.md
 # so the repo carries the rule itself.
 .claude/
 .superpowers/
+
+# A local pre-push secret scan, wired in by hand via core.hooksPath. Not
+# shipped: it only ever runs in the clone that pushes, so it protects this
+# checkout and no other - while its mere presence as a `prepare` script made
+# every `npx github:` install pull the devDependencies.
+.git-hooks/

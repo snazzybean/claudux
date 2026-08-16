@@ -25,8 +25,7 @@
     "start": "node --env-file-if-exists=.env src/server.js",
     "test": "sh scripts/run-tests.sh",
     "lint": "eslint .",
-    "setup": "node scripts/setup.js",
-    "prepare": "git config core.hooksPath .git-hooks || true"
+    "setup": "node scripts/setup.js"
   },
   "dependencies": {
     "compression": "^1.8.1",

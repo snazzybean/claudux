@@ -7,10 +7,9 @@ import { LOGIN_DONE_MARKER } from '../src/lib/tmuxManager.js';
 const URL_LINE =
   'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code';
 
-// Composed instead of a single literal: the pre-push hook blocks any line
-// with "sk-ant-" and 20 following characters - deliberately even in test
-// files, so a real token can't slip through there. A made-up value must not
-// weaken that block.
+// Composed instead of a single literal: secret scanners flag any line with
+// "sk-ant-" and 20 following characters, test files included. A made-up
+// value must not train anyone to wave that warning through.
 const TOKEN_PREFIX = 'sk-ant-' + 'oat01-';
 
 test('reports starting as long as nothing recognizable is on the screen', () => {

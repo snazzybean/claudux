@@ -109,22 +109,14 @@ test: cover the /clear chain in sessionMeta
 
 ## Secrets
 
-A pre-push hook under `.git-hooks/pre-push` scans outgoing commits for
-accidentally committed tokens. It's wired in automatically by the
-`prepare` script on `npm install`. If you skipped that, enable it by hand
-with:
+Account tokens start with `sk-ant-` and are easy to paste into a fixture by
+accident. Test values that have to look like one are composed
+(`'sk-ant-' + 'oat01-'`) rather than written out, so a scanner reading the
+diff doesn't trip over them.
 
-```bash
-git config core.hooksPath .git-hooks
-```
-
-Note that `prepare` sets `core.hooksPath` for the whole clone. If you keep
-your own hooks in `.git/hooks`, they stop running from that point on —
-`npm install` overwrites the setting without saying so.
-
-The hook is a backstop, not a check you can lean on: it matches token
-shapes, not internal hostnames, paths or e-mail addresses. Those are on
-you, and a public repo is unforgiving about them.
+Token shapes are the easy half. Internal hostnames, paths and e-mail
+addresses match no pattern and are on you — a public repo is unforgiving
+about them.
 
 ## Reporting Issues
 
