@@ -65,6 +65,24 @@ test('ensurePrerequisites installs only after the question is answered yes', asy
   assert.deepEqual(installed, [['brew', 'install', 'ttyd']]);
 });
 
+// A failed install is an error, not a status update: it must go to
+// logError (stderr), not log (stdout) - a pipeline separating the two
+// streams would otherwise lose it among the success messages.
+test('ensurePrerequisites reports a failed install through logError, not log', async () => {
+  const logged = [];
+  const errors = [];
+  await ensurePrerequisites({
+    checkFn: (bin) => bin !== 'ttyd',
+    platform: 'darwin',
+    confirmFn: async () => true,
+    installFn: () => false,
+    log: (msg) => logged.push(msg),
+    logError: (msg) => errors.push(msg),
+  });
+  assert.deepEqual(errors, ['Installation failed - please install manually.']);
+  assert.ok(!logged.some((msg) => msg.includes('Installation failed')));
+});
+
 test('ensurePrerequisites installs nothing when the question is answered no', async () => {
   let called = false;
   await ensurePrerequisites({

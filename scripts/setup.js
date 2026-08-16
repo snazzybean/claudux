@@ -67,6 +67,7 @@ export async function ensurePrerequisites({
   confirmFn,
   installFn = runInstall,
   log = console.log,
+  logError = console.error,
 } = {}) {
   const missing = detectMissingBinaries({ checkFn });
   if (missing.length > 0) {
@@ -76,7 +77,7 @@ export async function ensurePrerequisites({
       const cmd = installCommandFor(manager, missing);
       if (await confirmFn(`Install with "${cmd.join(' ')}"?`)) {
         if (!installFn(cmd, { needsSudo: manager !== 'brew' })) {
-          log('Installation failed - please install manually.');
+          logError('Installation failed - please install manually.');
         }
       } else {
         log(`Please install manually: ${cmd.join(' ')}`);
