@@ -18,15 +18,23 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # ttyd is never spawned - ttydManager.start() takes an injected
-      # spawnFn - so only tmux needs installing here.
       - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - run: tmux -V
 
       # The route tests start real tmux sessions, and scripts/claude-session.sh
       # runs `claude` in them: without the binary the pane dies at once and
       # every such test waits out its precondition. No token is needed - the
       # tests use an invalid one and only require the process to stay up.
       - run: npm install -g @anthropic-ai/claude-code
+
+      # ttyd is not packaged for Ubuntu, and one integration test starts a
+      # real ttyd and talks to it over the base path. The upstream release
+      # binary is static, so fetching it is cheaper than building it.
+      - run: |
+          curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd
+          sudo chmod +x /usr/local/bin/ttyd
+          ttyd --version
 
       # `tmux set-buffer` does not start a server, it fails without one, and
       # the buffer route test works against the host's shared server the way
