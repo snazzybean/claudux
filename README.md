@@ -105,6 +105,7 @@ before a session can use it.
 ```sh
 git clone https://github.com/snazzybean/claudux.git
 cd claudux
+git -c advice.detachedHead=false checkout "$(git describe --tags --abbrev=0)"
 npm install
 npm run setup
 npm start
@@ -114,6 +115,11 @@ npm start
 tmux or ttyd via the detected package manager (asking first, and outside
 Homebrew through `sudo`), reports whether the Claude Code CLI is there, and
 creates `.env` from `.env.example`.
+
+The checkout of the latest tag is what lets the interface keep itself current
+(see [Updating](#updating) below). Git has no `latest` ref, hence the
+subshell: `git describe` picks the newest tag reachable from `HEAD`, which
+after a fresh clone is the latest release.
 
 ### First start
 
@@ -166,6 +172,35 @@ stays, and the session resumes where it left off.
 If `claude` crashes, the tmux session stays: the next attach explains what
 happened, tapping the row replaces the session, and a toast names the exit
 code or signal.
+
+## Updating
+
+Claudux checks GitHub twice a day for a newer release and puts a card at the
+bottom of the sidebar when there is one, with a link to the release notes.
+The Settings have a **System** tab for the same thing plus a button that
+checks right away.
+
+Whether the card can act on it depends on how claudux was installed:
+
+| | |
+|---|---|
+| From a checkout | The button pulls the release and restarts the service |
+| Docker | `docker pull` and restart the container |
+| npx | The next `npx` invocation brings it along |
+
+The button needs a checkout that has no uncommitted changes and sits exactly
+on a release tag — the state the setup above leaves behind. Anything else
+still gets the card, with the reason spelled out under the disabled button;
+nothing is ever stashed or forced. It fetches, checks out the new tag, runs
+`npm ci --omit=dev` and restarts. If any of that fails, the previous commit
+and the previous `node_modules` are put back and no restart happens.
+
+Running sessions survive the restart, because they live in tmux and the unit
+sets `KillMode=process`. Terminals open in a browser need a reload — the page
+does that itself once the new version answers.
+
+Because the install skips dev dependencies, a checkout you also run the tests
+in wants an `npm install` afterwards.
 
 ## Security
 
