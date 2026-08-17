@@ -28,9 +28,12 @@ jobs:
 
       # ttyd is not packaged for Ubuntu, and one integration test starts a
       # real ttyd and talks to it over the base path. The upstream release
-      # binary is static, so fetching it is cheaper than building it.
+      # binary is static, so fetching it is cheaper than building it. Pinned
+      # by content like in the Dockerfile: a release asset can be replaced
+      # under its tag.
       - run: |
           curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd
+          echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /usr/local/bin/ttyd" | sha256sum -c -
           sudo chmod +x /usr/local/bin/ttyd
           ttyd --version
 
@@ -47,3 +50,23 @@ jobs:
       # Runs through scripts/run-tests.sh, which keeps --test-concurrency=1.
       # Do not raise it: the suite starts real tmux sessions.
       - run: npm test
+
+  # release.yml builds the image only from a tag, by which point the release
+  # is already published - so a Dockerfile that no longer builds would be
+  # found after the fact. Here it is built on every push and pull request.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # amd64 alone, and no QEMU: the second architecture is emulated here,
+      # costs minutes per run and would only repeat what this one proves.
+      # The multi-arch build stays in release.yml.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
