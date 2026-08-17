@@ -20,8 +20,6 @@ jobs:
 
       - run: sudo apt-get update && sudo apt-get install -y tmux
 
-      - run: tmux -V
-
       # The route tests start real tmux sessions, and scripts/claude-session.sh
       # runs `claude` in them: without the binary the pane dies at once and
       # every such test waits out its precondition. No token is needed - the

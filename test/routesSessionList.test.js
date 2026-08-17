@@ -7,11 +7,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createApp } from '../src/server.js';
-import { setRemainOnExit, listTmuxSessions } from '../src/lib/tmuxManager.js';
+import { setRemainOnExit } from '../src/lib/tmuxManager.js';
 import {
   tmpConfig,
   killSessionEventually,
   crashPaneProcess,
+  waitForPaneDeath,
   assertAliveSession,
   startedSession,
 } from './helpers/routeHarness.js';
@@ -388,12 +389,7 @@ test('GET /api/projects/:id/sessions marks a clean exit as cleanExit, not crashe
       const proc = spawn('tmux', ['respawn-pane', '-k', '-t', session.id, '--', 'sh', '-c', 'exit 0']);
       proc.on('close', () => resolve());
     });
-    let corpse;
-    for (let i = 0; i < 30; i++) {
-      corpse = (await listTmuxSessions()).find((s) => s.name === session.id);
-      if (corpse?.dead) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    const corpse = await waitForPaneDeath(session.id);
     assert.equal(corpse.deadStatus, 0, 'precondition: a clean exit');
 
     const res = await fetch(`${base}/api/projects/${project.id}/sessions`);

@@ -96,6 +96,24 @@ export async function killSessionEventually(name, attempts = 20, delayMs = 100) 
   }
 }
 
+// tmux fills `pane_dead` from the pane's fd closing and the two death
+// fields from the SIGCHLD for its process - two separate events, in no
+// guaranteed order. So a pane can already be listed as dead while
+// pane_dead_status and pane_dead_signal are both still empty, and waiting
+// for `dead` alone hands back an entry whose cause of death is missing.
+// Every caller here asserts on that cause, so this is what they have to
+// wait for. The entry goes into the timeout message: without it a wait that
+// runs out cannot be told apart from a pane that died the other way.
+export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100 } = {}) {
+  let entry;
+  for (let i = 0; i < attempts; i++) {
+    entry = (await listTmuxSessions()).find((s) => s.name === sessionId);
+    if (entry?.dead && (entry.deadStatus !== null || entry.deadSignal !== null)) return entry;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(`pane of ${sessionId} did not report a cause of death: ${JSON.stringify(entry)}`);
+}
+
 // A crash in production is the pane's process dying while the tmux session
 // stays. Returns the sessionId of a session that is now a corpse.
 export async function crashPaneProcess(sessionId, { signal = 'SIGKILL' } = {}) {
@@ -107,12 +125,13 @@ export async function crashPaneProcess(sessionId, { signal = 'SIGKILL' } = {}) {
   });
   assert.ok(pid, 'precondition: the pane PID was read');
   process.kill(Number(pid), signal);
-  for (let i = 0; i < 30; i++) {
-    const entry = (await listTmuxSessions()).find((s) => s.name === sessionId);
-    if (entry?.dead) return entry;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error(`pane of ${sessionId} did not become dead`);
+  const entry = await waitForPaneDeath(sessionId);
+  // An exit status instead of a signal means the pane process was already
+  // gone when the kill above landed. Caught here, with the whole entry, so
+  // it doesn't reach the callers as a bare `null !== 9` on the signal.
+  assert.notEqual(entry.deadSignal, null,
+    `precondition: the pane died by the test's signal, not on its own: ${JSON.stringify(entry)}`);
+  return entry;
 }
 
 // Waits until the session is not only there but actually alive. Without

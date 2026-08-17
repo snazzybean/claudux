@@ -25,6 +25,7 @@ import {
   patchJson,
   killSessionEventually,
   crashPaneProcess,
+  waitForPaneDeath,
   assertAliveSession,
   startedSession,
 } from './helpers/routeHarness.js';
@@ -671,12 +672,7 @@ test('POST /api/sessions/:id/resume stays silent about a clean exit', async () =
       const proc = spawn('tmux', ['respawn-pane', '-k', '-t', session.id, '--', 'sh', '-c', 'exit 0']);
       proc.on('close', () => resolve());
     });
-    let corpse;
-    for (let i = 0; i < 30; i++) {
-      corpse = (await listTmuxSessions()).find((s) => s.name === session.id);
-      if (corpse?.dead) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    const corpse = await waitForPaneDeath(session.id);
     assert.equal(corpse.deadStatus, 0, 'precondition: a clean exit');
 
     const res = await fetch(`${base}/api/sessions/${session.id}/resume`, { method: 'POST' });
