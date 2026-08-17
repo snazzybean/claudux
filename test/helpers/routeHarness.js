@@ -128,10 +128,13 @@ async function diagnoseLostDeath(sessionId, pid) {
     proc.on('close', () => resolve(out.trim()));
     proc.on('error', (e) => resolve(`spawn failed: ${e.message}`));
   });
-  const procStat = await run('sh', ['-c', `cat /proc/${pid}/stat 2>&1 | cut -c1-120; echo "---"; ps -o pid=,ppid=,stat=,comm= -p ${pid} 2>&1`]);
+  const serverPid = (await run('tmux', ['display-message', '-p', '#{pid}'])).trim();
+  const procStat = await run('sh', ['-c', `ps -o pid=,ppid=,stat=,comm= -p ${pid} 2>&1`]);
+  const serverState = await run('sh', ['-c',
+    `grep -E '^(Sig|Thread|State)' /proc/${serverPid}/status 2>&1; echo "--- children of ${serverPid}:"; ps --ppid ${serverPid} -o pid=,stat=,comm= 2>&1 | sort -k2 | head -40`]);
   const panes = await run('tmux', ['list-panes', '-a', '-F',
-    '#{session_name} w#{window_index} pid=#{pane_pid} dead=#{pane_dead} status=#{pane_dead_status} signal=#{pane_dead_signal} remain=#{?pane_dead,,}']);
-  console.error(`DIAG ${sessionId}: killed pid ${pid}\nDIAG proc: ${procStat}\nDIAG panes:\n${panes}`);
+    '#{session_name} w#{window_index} pid=#{pane_pid} dead=#{pane_dead} status=#{pane_dead_status} signal=#{pane_dead_signal}']);
+  console.error(`DIAG ${sessionId}: killed pid ${pid}, tmux server ${serverPid}\nDIAG proc: ${procStat}\nDIAG server:\n${serverState}\nDIAG panes:\n${panes}`);
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 500));
     const late = (await listTmuxSessions()).find((s) => s.name === sessionId);
@@ -140,7 +143,9 @@ async function diagnoseLostDeath(sessionId, pid) {
       return;
     }
   }
-  console.error(`DIAG ${sessionId}: fields still empty after 20s extra`);
+  const after = await run('sh', ['-c',
+    `grep -E '^Sig' /proc/${serverPid}/status 2>&1; ps -o pid=,stat= -p ${pid} 2>&1`]);
+  console.error(`DIAG ${sessionId}: fields still empty after 20s extra\nDIAG after:\n${after}`);
 }
 
 // A crash in production is the pane's process dying while the tmux session
