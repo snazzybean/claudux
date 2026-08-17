@@ -1,4 +1,4 @@
-FROM node:22-slim
+FROM node:26-slim
 
 # ttyd is not packaged for Debian - the upstream release binary is static
 # and published per architecture, which is cheaper than building
