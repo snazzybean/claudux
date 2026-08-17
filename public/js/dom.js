@@ -37,6 +37,7 @@ export const overlayMenuTextEl = document.getElementById('overlayMenuText');
 export const toastEl = document.getElementById('toast');
 export const sidebarToggleEl = document.getElementById('sidebarToggle');
 export const sidebarRailEl = document.getElementById('sidebarRail');
+export const sidebarResizerEl = document.getElementById('sidebarResizer');
 export const authBannerEl = document.getElementById('authBanner');
 export const focusHolderEl = document.getElementById('focusHolder');
 

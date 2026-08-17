@@ -14,8 +14,10 @@ import {
   termBellListEl,
   termBorderToggleEl,
   sidebarToggleEl,
+  sidebarResizerEl,
 } from './dom.js';
 import { applyTerminalColors, forceTerminalReflow } from './terminal.js';
+import { makeResizable } from './resizer.js';
 import { svg } from './icons.js';
 
 // ---------- Color palette ----------
@@ -58,6 +60,11 @@ function markPalette() {
 // --term-* variables and the border rules in styles.css hang off them,
 // and applyTerminalColors() reads back exactly those. A second source
 // could drift out of sync.
+// ---------- Sidebar width ----------
+// The value the grid column falls back to, and what a double click on the
+// handle returns to. Kept in step with the default on .app in styles.css.
+const SIDEBAR_DEFAULT_WIDTH = 328;
+
 const TERM_BELL_KEY = 'claudux-term-sound';
 const TERM_BORDER_KEY = 'claudux-term-border';
 const TERM_BELL_DEFAULT = 'console';
@@ -185,4 +192,23 @@ export function initAppearance() {
   } catch {
     // see setSidebarCollapsed
   }
+
+  // The sidebar's width belongs to the same family as the four above: a value
+  // on the root element that styles.css resolves and localStorage remembers.
+  // The collapsed state stays untouched by it - collapsed is 60px either way,
+  // and the dragged width applies again once it is expanded.
+  makeResizable(sidebarResizerEl, {
+    key: 'sidebar',
+    fallback: SIDEBAR_DEFAULT_WIDTH,
+    apply: (width) => appEl.style.setProperty('--sidebar-width', `${Math.round(width)}px`),
+    // The variable, not the element: .sidebar carries an 8px left margin
+    // inside its grid column, so measuring the aside would lose those 8px
+    // again on every drag.
+    measure: () => parseFloat(
+      getComputedStyle(appEl).getPropertyValue('--sidebar-width'),
+    ) || SIDEBAR_DEFAULT_WIDTH,
+    // The upper bound leaves the terminal a usable width even on a small
+    // laptop screen.
+    limits: () => [240, Math.max(240, Math.min(560, window.innerWidth - 320))],
+  });
 }

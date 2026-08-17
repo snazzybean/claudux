@@ -652,10 +652,17 @@ button { cursor: pointer; }
 .shell {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 328px 1fr;
+  /* Draggable, see js/resizer.js. The default is kept in step with
+     SIDEBAR_DEFAULT_WIDTH in js/appearance.js, which a double click on the
+     handle returns to. */
+  grid-template-columns: var(--sidebar-width, 328px) 1fr;
   min-height: 0;
   transition: grid-template-columns var(--dur);
 }
+
+/* While dragging, the transition would make the column lag behind the pointer
+   for its whole duration - it exists for the collapse animation, not for this. */
+:root[data-resizing] .shell { transition: none; }
 
 /* ---------- Sidebar ---------- */
 /* A detached surface instead of a flush-mounted column, same language as
@@ -672,6 +679,7 @@ button { cursor: pointer; }
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+  position: relative; /* anchor for .edge-handle, see index.html */
   margin: 8px 0 8px 8px;
   display: flex;
   flex-direction: column;
@@ -3228,6 +3236,172 @@ button { cursor: pointer; }
   text-align: left;
 }
 .markdown-body th { background: var(--surface-2); }
+
+/* ---------- Draggable edges (js/resizer.js) ----------
+   Two of them: the sidebar's right edge, anchored inside the sidebar because
+   .shell has room for exactly two grid columns, and the one between file list
+   and file view, which is a flex item of its own. 6px wide - narrower is hard
+   to hit with a trackpad, wider starts swallowing clicks meant for a row. */
+.edge-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none; /* or the browser scrolls instead of reporting the drag */
+}
+.edge-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+.edge-handle:hover::after,
+.edge-handle[data-dragging]::after { opacity: 0.5; }
+
+/* Inside the Files panel it separates two flex items, so it takes part in the
+   layout instead of hanging off one side. */
+.edge-handle-files {
+  position: relative;
+  flex: 0 0 6px;
+  align-self: stretch;
+}
+
+/* Collapsed the width is fixed at 60px, and below 721px the panels aren't side
+   by side at all - in both cases there is no edge to drag. */
+.app[data-sidebar="collapsed"] .edge-handle { display: none; }
+@media (max-width: 720px) {
+  .edge-handle { display: none; }
+}
+
+/* ---------- File tree ----------
+   The rows come out flat, with their level in --depth (js/fileTree.js): one
+   indent rule instead of nested lists, which keeps every .file-row rule below
+   applying to a row at any depth.
+
+   The card itself stays flush and only its content moves: indenting by margin
+   would make every level narrower, and by level six the name would have less
+   room than the indent.
+
+   Here the tree deliberately leaves the card look the rest of the interface
+   uses (see .session-row, .file-row). A card says "one of few, tap me"; a tree
+   is many rows at once, and forty fills of their own with forty shadows read as
+   a wall rather than a structure. What marks a row here is hover and being the
+   open file - the rest is quiet. The phone list keeps its cards: there the row
+   is a thumb target, and there are never forty of them on screen. */
+.file-content-tree .file-row {
+  margin: 0 6px;
+  width: calc(100% - 12px);
+  padding: 6px 8px 6px calc(8px + var(--depth, 0) * 20px);
+  background-color: transparent;
+  box-shadow: none;
+  border-radius: 6px;
+}
+.file-content-tree .file-row:hover {
+  background-color: color-mix(in srgb, var(--surface-2) 78%, var(--text));
+}
+.file-content-tree .file-row[data-active-entry="true"] {
+  background-color: color-mix(in srgb, var(--surface-2) 84%, var(--accent));
+}
+.file-content-tree .file-hint {
+  margin: 2px 0;
+  padding-left: calc(28px + var(--depth, 0) * 20px);
+}
+
+/* One thin line per level, so a row of depth three is visibly a child of the
+   folder above it. Drawn as a background instead of nested containers, which
+   is what keeps the rows flat: the gradient repeats every 20px and is cut off
+   after --depth steps. */
+.file-content-tree .file-row,
+.file-content-tree .file-hint {
+  background-repeat: no-repeat;
+  background-position: 14px 0;
+  background-size: calc(var(--depth, 0) * 20px) 100%;
+  background-image: repeating-linear-gradient(
+    to right,
+    color-mix(in srgb, var(--border) 75%, transparent) 0 1px,
+    transparent 1px 20px
+  );
+}
+.file-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: transform var(--dur);
+}
+.file-row[data-expanded="true"] .file-chevron { transform: rotate(90deg); }
+.file-pending { font-style: italic; }
+
+/* The path above the tree is text, not buttons: every level is on screen
+   already, so there is nothing left to navigate to. */
+.file-tree-path {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: var(--fs-ui);
+}
+.file-tree-project { font-weight: 600; }
+.file-tree-subpath {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Folders and files are already grouped by the server's sort order; the label
+   only names the groups, and only where both are present. */
+.file-group-label {
+  margin: 8px 0 2px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-meta);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.file-group-label:first-child { margin-top: 2px; }
+
+/* Set apart from the entries below it: it leads out of the folder, they lead
+   in. No edge for that - cards here carry a fill and no border - so it gives up
+   its surface instead and keeps its distance. */
+.file-row-up {
+  margin-bottom: 12px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+.file-row-up:hover { background: var(--surface-hover); }
+
+/* GitHub's alerts (`> [!TIP]`), built in src/lib/fileRender.js. Two tones for
+   five types, not five: the palette carries one accent and one danger colour,
+   and a yellow plus a purple for this would be the only values outside it.
+   Which of the five it is comes from the icon and the label - the tone only
+   separates "read this" from "careful". */
+.markdown-body .markdown-alert {
+  --alert-tone: var(--accent);
+  margin: 0 0 1em;
+  padding: 10px 12px;
+  border-left: 3px solid var(--alert-tone);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: color-mix(in srgb, var(--alert-tone) 8%, transparent);
+}
+.markdown-body .markdown-alert-warning,
+.markdown-body .markdown-alert-caution { --alert-tone: var(--danger); }
+.markdown-body .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--alert-tone);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+}
+.markdown-body .markdown-alert-title svg { flex: none; }
+.markdown-body .markdown-alert > *:last-child { margin-bottom: 0; }
 
 /* ---------- Syntax highlighting colors ----------
    Custom variables instead of one of the bundled highlight.js themes: the

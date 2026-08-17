@@ -91,6 +91,12 @@
              narrow screens - there data-view handles showing/hiding the
              whole sidebar. -->
         <div class="sidebar-rail" id="sidebarRail"></div>
+        <!-- Draggable edge (js/resizer.js). Inside the sidebar, not between the
+             two grid columns: .shell defines exactly two of them, and a third
+             child would push the panel into a row of its own. A separator
+             rather than a button - it carries a value, not an action. -->
+        <div class="edge-handle" id="sidebarResizer" role="separator"
+             aria-orientation="vertical" aria-label="Sidebar width"></div>
       </aside>
       <main class="panel">
         <!-- Text in its own element, so the close button stays put when the

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
+import sanitizeHtml from 'sanitize-html';
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => (
@@ -87,6 +88,96 @@ function projectPathFor(target, directoryRel) {
   return combined;
 }
 
+// GitHub's alert syntax, which is not markdown: without this the marker stays
+// in the first line and the block renders as an ordinary quote.
+const ALERT_TYPES = {
+  note: 'Note',
+  tip: 'Tip',
+  important: 'Important',
+  warning: 'Warning',
+  caution: 'Caution',
+};
+const ALERT_MARKER = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*\n?/;
+
+// Heading text -> anchor id. Markdown markup and punctuation drop out, spaces
+// become hyphens, letters and digits of any script survive - a heading in
+// German or Greek should still be reachable.
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[`*_~]/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+// Tags and attributes the finished document may contain. Two sources feed
+// into it: the raw HTML a README brings along, and the markup the renderers
+// below emit - `class` above all, without which every code block silently
+// loses its highlighting.
+//
+// `id` stays on headings alone. The rendered file lands in the app's own DOM,
+// where an id out of a foreign README would answer a getElementById meant for
+// the interface.
+const ALLOWED_TAGS = [
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'p', 'div', 'span', 'blockquote', 'pre', 'code',
+  'ul', 'ol', 'li', 'input',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'a', 'img', 'strong', 'em', 'del', 'hr', 'br',
+  'details', 'summary', 'kbd', 'sub', 'sup',
+];
+
+const ALLOWED_ATTRIBUTES = {
+  '*': ['class'],
+  h1: ['id'], h2: ['id'], h3: ['id'], h4: ['id'], h5: ['id'], h6: ['id'],
+  a: ['href', 'target', 'rel', 'title', 'data-file-path'],
+  img: ['src', 'alt', 'title', 'width', 'height'],
+  p: ['align', 'data-icon'],
+  div: ['align'],
+  th: ['align'],
+  td: ['align'],
+  input: ['type', 'checked', 'disabled'],
+};
+
+// A relative target in raw HTML never reaches the link() and image()
+// renderers below - marked hands the tag over as one opaque token. Both are
+// therefore resolved here a second time, or raw HTML would be the way around
+// them. Anything already absolute stays untouched, including the raw route
+// image() has just produced.
+function resolveRawHtmlTarget(value, directoryRel) {
+  if (!value || value.startsWith('#') || value.startsWith('/') || HAS_SCHEME.test(value)) return null;
+  return projectPathFor(value, directoryRel);
+}
+
+function sanitizeOptions({ projectId, directoryRel }) {
+  return {
+    allowedTags: ALLOWED_TAGS,
+    allowedAttributes: ALLOWED_ATTRIBUTES,
+    allowedSchemes: ['http', 'https', 'mailto'],
+    transformTags: {
+      img(tagName, attribs) {
+        const relativePath = resolveRawHtmlTarget(attribs.src, directoryRel);
+        if (!relativePath) {
+          // Leads out of the project: drop the src, and exclusiveFilter below
+          // takes the element with it.
+          if (attribs.src && !attribs.src.startsWith('/') && !HAS_SCHEME.test(attribs.src)) {
+            return { tagName, attribs: { ...attribs, src: '' } };
+          }
+          return { tagName, attribs };
+        }
+        return { tagName, attribs: { ...attribs, src: rawUrl(projectId, relativePath) } };
+      },
+      a(tagName, attribs) {
+        const relativePath = resolveRawHtmlTarget(attribs.href, directoryRel);
+        if (!relativePath) return { tagName, attribs };
+        return { tagName, attribs: { ...attribs, href: '#', 'data-file-path': relativePath } };
+      },
+    },
+    exclusiveFilter: (frame) => frame.tag === 'img' && !frame.attribs.src,
+  };
+}
+
 export function renderMarkdown(sourceText, { projectId, directoryRel = '' } = {}) {
   const marked = new Marked(
     markedHighlight({
@@ -98,13 +189,45 @@ export function renderMarkdown(sourceText, { projectId, directoryRel = '' } = {}
     }),
   );
 
+  const slugCounts = new Map();
+
   marked.use({
     renderer: {
-      // marked no longer escapes raw HTML on its own since v5 (the
-      // `sanitize` option was removed) - without this renderer a <script>
-      // would pass through unchanged. Covers both block and inline HTML.
+      // Raw HTML passes through here and is filtered once at the end, on the
+      // finished document. Per token it cannot work: marked hands
+      // <details> and </details> over as two of them, and sanitizing each on
+      // its own closes the first and drops the second.
       html(token) {
-        return escapeHtml(token.text);
+        return token.text;
+      },
+      // marked emits no ids of its own, which leaves every [text](#anchor) in
+      // a README pointing at nothing.
+      heading(token) {
+        const base = slugify(token.text) || 'section';
+        const seen = slugCounts.get(base) ?? 0;
+        slugCounts.set(base, seen + 1);
+        const id = seen === 0 ? base : `${base}-${seen}`;
+        const text = this.parser.parseInline(token.tokens);
+        return `<h${token.depth} id="${escapeHtml(id)}">${text}</h${token.depth}>\n`;
+      },
+      blockquote(token) {
+        const paragraph = token.tokens?.[0];
+        const inline = paragraph?.type === 'paragraph' ? paragraph.tokens?.[0] : null;
+        const marker = inline?.type === 'text' ? ALERT_MARKER.exec(inline.text) : null;
+        if (!marker) {
+          return `<blockquote>\n${this.parser.parse(token.tokens)}</blockquote>\n`;
+        }
+        // Cut the marker off the first inline token, so it doesn't show up in
+        // the body the parser builds from the same tokens below.
+        inline.text = inline.text.slice(marker[0].length);
+        const type = marker[1].toLowerCase();
+        // The icon is inserted by public/js/files.js from js/icons.js -
+        // inline SVG is the only icon source in this UI, and the server has
+        // no business holding a second copy of it.
+        return `<div class="markdown-alert markdown-alert-${type}">`
+          + `<p class="markdown-alert-title" data-icon="${type}">`
+          + `<span>${ALERT_TYPES[type]}</span></p>\n`
+          + `${this.parser.parse(token.tokens)}</div>\n`;
       },
       link(token) {
         const text = this.parser.parseInline(token.tokens);
@@ -137,5 +260,5 @@ export function renderMarkdown(sourceText, { projectId, directoryRel = '' } = {}
     },
   });
 
-  return marked.parse(sourceText);
+  return sanitizeHtml(marked.parse(sourceText), sanitizeOptions({ projectId, directoryRel }));
 }

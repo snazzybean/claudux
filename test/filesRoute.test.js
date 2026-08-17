@@ -167,7 +167,7 @@ test('GET /api/files/view renders markdown and includes the source text', async 
     const body = await res.json();
 
     assert.equal(body.type, 'markdown');
-    assert.ok(body.html.includes('<h1>Title</h1>'));
+    assert.ok(body.html.includes('<h1 id="title">Title</h1>'));
     assert.ok(!body.html.includes('<script>'));
     assert.ok(body.raw.includes('<script>'));
     assert.equal(body.editable, true);

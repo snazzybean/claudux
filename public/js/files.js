@@ -8,11 +8,24 @@
 // outside never reaches the importing module.
 import { filesPanelEl } from './dom.js';
 import { showToast, checkResponse } from './messages.js';
-import { svg } from './icons.js';
+import { svg, svgNode } from './icons.js';
+import { buildRow, buildTree, formatSize } from './fileTree.js';
+import { makeResizable } from './resizer.js';
 
 // Last opened directory per project: switching tabs returns there, not to
 // the root.
 const lastDirectory = new Map();
+
+// The five GitHub alert types (see src/lib/fileRender.js) and their icons.
+// caution takes the crossed circle rather than a second triangle, so it reads
+// as more than a louder warning.
+const ALERT_ICONS = {
+  note: 'info',
+  tip: 'bulb',
+  important: 'important',
+  warning: 'warning',
+  caution: 'forbidden',
+};
 
 let project = null;
 // Directory and open file are two states side by side, not an
@@ -23,19 +36,22 @@ let currentDirectory = null; // path relative to the project root; '' is the roo
 let directoryData = null; // the most recently loaded response, for redrawing
 let activeFile = null; // { path, view, sourceView, editing }
 
-const isWideEnough = () => window.matchMedia('(min-width: 721px)').matches;
+// The tree needs several directories at once, the list exactly one. Both read
+// from here: `loaded` maps a directory path to its response, `expanded` holds
+// the folders that are open. Per project like lastDirectory above, so
+// switching tabs comes back to the same tree instead of a collapsed root.
+const loadedByProject = new Map();
+const expandedByProject = new Map();
 
-function iconFor(kind) {
-  const name = kind === 'folder' ? 'folder' : kind === 'image' ? 'image' : 'file';
-  return svg(name, 'file-icon');
+function treeState() {
+  const id = project.id;
+  if (!loadedByProject.has(id)) loadedByProject.set(id, new Map());
+  if (!expandedByProject.has(id)) expandedByProject.set(id, new Set());
+  return { loaded: loadedByProject.get(id), expanded: expandedByProject.get(id) };
 }
 
-function formatSize(bytes) {
-  if (typeof bytes !== 'number') return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} kB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+const WIDE_QUERY = '(min-width: 721px)';
+const isWideEnough = () => window.matchMedia(WIDE_QUERY).matches;
 
 function api(path, subPath = '', extra = '') {
   const p = `project=${encodeURIComponent(project.id)}&path=${encodeURIComponent(path)}`;
@@ -47,17 +63,38 @@ function parentOf(path) {
   return i === -1 ? '' : path.slice(0, i);
 }
 
+const TREE_DEFAULT_SHARE = 0.5; // the 50/50 the two columns had before
+
 // The two columns exist permanently; only one of them is ever redrawn at a
-// time - clearing the whole panel would stop list and file coexisting.
+// time - clearing the whole panel would stop list and file coexisting. The
+// draggable edge between them is built here for the same reason: it has to
+// outlive every redraw of either side.
 function scaffold() {
   let tree = filesPanelEl.querySelector('.file-tree');
   if (!tree) {
     tree = document.createElement('div');
     tree.className = 'file-tree';
+    const handle = document.createElement('div');
+    handle.className = 'edge-handle edge-handle-files';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', 'File list width');
     const newMain = document.createElement('div');
     newMain.className = 'file-main';
-    filesPanelEl.replaceChildren(tree, newMain);
+    filesPanelEl.replaceChildren(tree, handle, newMain);
     filesPanelEl.dataset.fileView = 'list';
+    // A deep tree needs more width than a flat list, and the file beside it
+    // should stay readable - which of the two wins is not ours to decide.
+    makeResizable(handle, {
+      key: 'file-tree',
+      fallback: filesPanelEl.getBoundingClientRect().width * TREE_DEFAULT_SHARE,
+      apply: (width) => tree.style.setProperty('flex', `0 0 ${Math.round(width)}px`),
+      measure: () => tree.getBoundingClientRect().width,
+      limits: () => {
+        const panel = filesPanelEl.getBoundingClientRect().width;
+        return [200, Math.max(200, panel * 0.6)];
+      },
+    });
   }
   return { tree, main: filesPanelEl.querySelector('.file-main') };
 }
@@ -99,16 +136,29 @@ function isCurrent(id) {
   return project?.id === id;
 }
 
-async function openDirectory(path) {
+// Fetches one directory into the cache. Returns null when the request failed
+// or the project changed underneath - both cases where the caller must not go
+// on rendering.
+async function loadDirectory(path) {
   const projectId = project.id;
-  let data;
   try {
     const res = await fetch(api(path));
     await checkResponse(res);
-    data = await res.json();
-    if (!isCurrent(projectId)) return;
+    const data = await res.json();
+    if (!isCurrent(projectId)) return null;
+    treeState().loaded.set(data.path, data);
+    return data;
   } catch (err) {
-    if (!isCurrent(projectId)) return;
+    if (!isCurrent(projectId)) return null;
+    throw err;
+  }
+}
+
+async function openDirectory(path) {
+  let data;
+  try {
+    data = await loadDirectory(path);
+  } catch (err) {
     // A deleted directory must not lead to a dead end: one level up is the
     // next place that might still exist.
     if (path) {
@@ -117,10 +167,57 @@ async function openDirectory(path) {
     }
     return showError(err.message);
   }
+  if (!data) return;
   currentDirectory = data.path;
   directoryData = data;
   lastDirectory.set(project.id, data.path);
-  renderList(data);
+  renderBrowser();
+}
+
+// Opening is two steps: mark expanded and draw immediately, so the chevron
+// turns without waiting for the response, then fill the level in once it
+// arrives. Collapsing keeps the cached content - reopening costs no request.
+async function toggleDirectory(path) {
+  const { loaded, expanded } = treeState();
+  if (expanded.has(path)) {
+    expanded.delete(path);
+    return renderBrowser();
+  }
+  expanded.add(path);
+  renderBrowser();
+  if (loaded.has(path)) return;
+  try {
+    if (await loadDirectory(path)) renderBrowser();
+  } catch (err) {
+    expanded.delete(path);
+    showToast(`Folder not opened: ${err.message}`);
+    renderBrowser();
+  }
+}
+
+// Opens every folder along a path, so the tree shows a file that was reached
+// from somewhere else - a terminal link, a markdown link, the last directory
+// of the previous visit.
+async function revealPath(directoryPath) {
+  const { expanded } = treeState();
+  const parts = directoryPath ? directoryPath.split('/') : [];
+  const pending = [];
+  let walked = '';
+  for (const part of parts) {
+    walked = walked ? `${walked}/${part}` : part;
+    expanded.add(walked);
+    pending.push(walked);
+  }
+  renderBrowser();
+  for (const path of pending) {
+    if (treeState().loaded.has(path)) continue;
+    try {
+      await loadDirectory(path);
+    } catch {
+      expanded.delete(path); // gone in the meantime - leave the level closed
+    }
+  }
+  renderBrowser();
 }
 
 // `navigate: false` for a plain reload of the open file - otherwise
@@ -146,6 +243,12 @@ async function openFile(path, { navigate = true, line = null } = {}) {
   // This mainly concerns links in rendered markdown - those can point into
   // other directories too.
   const parent = parentOf(view.path);
+  if (isWideEnough()) {
+    // Nothing to navigate in the tree - the level is already on screen. What
+    // it needs is the folders along the path to be open.
+    if (navigate) return revealPath(parent);
+    return renderBrowser();
+  }
   if (navigate && parent !== currentDirectory) return openDirectory(parent);
   // Redraw only to update which row is marked active.
   if (directoryData) renderList(directoryData);
@@ -172,12 +275,43 @@ function scrollToLine(line) {
 function closeFile() {
   activeFile = null;
   renderMain();
+  if (isWideEnough()) return reloadTree();
   if (currentDirectory !== null) openDirectory(currentDirectory);
+}
+
+// Loads the root and every open folder again. Requests go out together: one
+// per open folder, and waiting for them in turn would show the tree filling up
+// level by level.
+async function reloadTree() {
+  if (!project) return;
+  const { loaded, expanded } = treeState();
+  loaded.clear();
+  if (!await loadRoot()) return;
+  await Promise.all([...expanded].map(async (path) => {
+    try {
+      await loadDirectory(path);
+    } catch {
+      expanded.delete(path); // gone in the meantime - leave the level closed
+    }
+  }));
+  renderBrowser();
+}
+
+async function loadRoot() {
+  try {
+    return await loadDirectory('');
+  } catch (err) {
+    showError(err.message);
+    return null;
+  }
 }
 
 function refresh() {
   if (!project) return;
-  if (currentDirectory !== null) openDirectory(currentDirectory);
+  // The cache goes, what is expanded stays: a reload should bring new files
+  // into view, not collapse a tree somebody just opened.
+  if (isWideEnough()) reloadTree();
+  else if (currentDirectory !== null) openDirectory(currentDirectory);
   // Not while editing: reloading would replace the textarea's content and
   // with it the unsaved change.
   if (activeFile && !activeFile.editing) openFile(activeFile.path, { navigate: false });
@@ -218,6 +352,57 @@ function buildBreadcrumbs(path) {
   return nav;
 }
 
+// Which of the two is drawn depends on the width, not on CSS: the DOM differs
+// (chevron, indent, no "Up one level" row). The listener at the end of the
+// module hands over when the width crosses the breakpoint.
+function renderBrowser() {
+  if (!project) return;
+  if (isWideEnough()) return renderTree();
+  if (directoryData) renderList(directoryData);
+}
+
+// In the tree the path is no longer a way to navigate - every level is on
+// screen. What stays is knowing where the open file sits, so this is text and
+// not a row of buttons.
+function buildTreePath() {
+  const nav = document.createElement('div');
+  nav.className = 'file-tree-path';
+  const name = document.createElement('span');
+  name.className = 'file-tree-project';
+  name.textContent = project.name;
+  nav.append(name);
+  const directory = activeFile ? parentOf(activeFile.path) : '';
+  if (directory) {
+    const rest = document.createElement('span');
+    rest.className = 'file-tree-subpath';
+    rest.textContent = `/ ${directory}`;
+    nav.append(rest);
+  }
+  return nav;
+}
+
+function renderTree() {
+  const { loaded, expanded } = treeState();
+  const rootData = loaded.get('');
+  if (!rootData) return; // still on its way - the load draws again
+  const header = buildHeader();
+  header.append(buildTreePath(), iconButton('reload', 'Reload', () => refresh()));
+  const content = buildTree(
+    { rootData, loaded, expanded, activePath: activeFile?.path ?? null },
+    { onToggle: toggleDirectory, onOpenFile: (path) => openFile(path) },
+  );
+  scaffold().tree.replaceChildren(header, content);
+}
+
+// Only worth a heading where both kinds are present - "Files" over a folder
+// list of one says nothing.
+function buildGroupLabel(text) {
+  const label = document.createElement('p');
+  label.className = 'file-group-label';
+  label.textContent = text;
+  return label;
+}
+
 function renderList(data) {
   const header = buildHeader();
   header.append(buildBreadcrumbs(data.path));
@@ -229,7 +414,7 @@ function renderList(data) {
   if (data.parent !== null) {
     const up = document.createElement('button');
     up.type = 'button';
-    up.className = 'file-row';
+    up.className = 'file-row file-row-up';
     up.innerHTML = `${svg('back', 'file-icon')}<span class="file-name">Up one level</span>`;
     up.addEventListener('click', () => openDirectory(data.parent));
     content.append(up);
@@ -242,28 +427,24 @@ function renderList(data) {
     content.append(emptyHint);
   }
 
+  const kinds = new Set(data.entries.map((e) => (e.type === 'folder' ? 'folder' : 'file')));
+  const labelled = kinds.size > 1;
+  let group = null;
+
   for (const entry of data.entries) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'file-row';
-    row.dataset.fileKind = entry.type;
-    row.innerHTML = iconFor(entry.type);
-    const name = document.createElement('span');
-    name.className = 'file-name';
-    // textContent, never innerHTML: names come from the filesystem.
-    name.textContent = entry.name;
-    const size = document.createElement('span');
-    size.className = 'file-size';
-    size.textContent = entry.type === 'folder' ? '' : formatSize(entry.size);
-    row.append(name, size);
+    const isFolder = entry.type === 'folder';
+    const kind = isFolder ? 'folder' : 'file';
+    if (labelled && kind !== group) {
+      content.append(buildGroupLabel(isFolder ? 'Folders' : 'Files'));
+      group = kind;
+    }
     const target = data.path ? `${data.path}/${entry.name}` : entry.name;
     // Which row is the open file must be shown by the list itself - on
     // desktop it sits permanently next to the file.
-    if (activeFile?.path === target) row.dataset.activeEntry = 'true';
-    row.addEventListener('click', () => (
-      entry.type === 'folder' ? openDirectory(target) : openFile(target)
-    ));
-    content.append(row);
+    content.append(buildRow(entry, {
+      active: activeFile?.path === target,
+      onClick: () => (isFolder ? openDirectory(target) : openFile(target)),
+    }));
   }
 
   scaffold().tree.replaceChildren(header, content);
@@ -380,9 +561,14 @@ function buildFileContent() {
   } else if (view.type === 'markdown' && !activeFile.sourceView) {
     const box = document.createElement('div');
     box.className = 'markdown-body';
-    // The HTML arrives already escaped from fileRender.js - the renderer
-    // there never lets raw HTML from the file through.
+    // The HTML arrives filtered from fileRender.js: raw HTML from the file
+    // has passed a whitelist there, script and event handlers are gone.
     box.innerHTML = view.html;
+    // The renderer names each alert's type and leaves the icon to this side,
+    // since js/icons.js is the only icon source in this UI.
+    for (const title of box.querySelectorAll('.markdown-alert-title[data-icon]')) {
+      title.prepend(svgNode(ALERT_ICONS[title.dataset.icon] ?? 'info', 'icon-symbol'));
+    }
     box.addEventListener('click', (e) => {
       const link = e.target.closest('a[data-file-path]');
       if (!link) return;
@@ -536,10 +722,34 @@ export function showFiles(newProject) {
   // The list is freshly loaded every time it's opened - Claude may be
   // creating files in the terminal alongside it. An open file view, on the
   // other hand, stays put so it doesn't interrupt an edit in progress.
+  if (isWideEnough()) return enterTree();
   openDirectory(projectChanged || currentDirectory === null
     ? (lastDirectory.get(newProject.id) ?? '')
     : currentDirectory);
 }
+
+// Which folders are open survives the tab switch, their content does not: the
+// same reasoning as the freshly loaded list above.
+async function enterTree() {
+  treeState().loaded.clear();
+  if (!await loadRoot()) return;
+  const target = activeFile
+    ? parentOf(activeFile.path)
+    : (lastDirectory.get(project.id) ?? '');
+  if (target) return revealPath(target);
+  renderBrowser();
+}
+
+// Rotating the phone crosses the breakpoint, and the display that fits has to
+// take over then - nothing else in this module reacts to a width change.
+window.matchMedia(WIDE_QUERY).addEventListener('change', () => {
+  if (!project || filesPanelEl.style.display === 'none') return;
+  // Coming from the list the tree has nothing but the current directory in its
+  // cache; entering it loads the root and opens the path that was reached.
+  if (isWideEnough()) enterTree();
+  else if (currentDirectory !== null) openDirectory(currentDirectory);
+  else openDirectory(lastDirectory.get(project.id) ?? '');
+});
 
 // Entry point for a path clicked in the terminal (see terminalLinks.js).
 // Callers switch to the Files tab (which calls showFiles(project)) BEFORE
