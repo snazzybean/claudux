@@ -15,6 +15,8 @@ import { browseRouter } from './routes/browse.js';
 import { filesRouter } from './routes/files.js';
 import { uploadsRouter, cleanupUploads } from './routes/uploads.js';
 import { usageRouter } from './routes/usage.js';
+import { updateRouter } from './routes/update.js';
+import { cleanupOldModules } from './lib/updateRun.js';
 import { checkNoGlobalAuthOverride } from '../scripts/check-settings-guard.js';
 import { cleanupSessionTokenFiles } from './lib/sessionTokenFile.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -115,6 +117,7 @@ export function createApp(config) {
   app.use('/api/uploads', uploadsRouter());
   app.use('/api/browse', browseRouter(config));
   app.use('/api/files', filesRouter(config));
+  app.use('/api/update', updateRouter(config));
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
@@ -158,6 +161,9 @@ export function startServer(config = loadConfig()) {
   // Same reasoning for pasted screenshots: an upload only matters for the
   // paste that follows it.
   cleanupUploads();
+  // Left over from a completed update: the old modules stay in place while
+  // the previous process is still using them (see updateRun.js).
+  cleanupOldModules().catch(() => {});
 
   const ttydChild = ttydManager.start({ ttydBin: config.ttydBin, port: config.ttydPort });
   const stopReaper = startReaperInterval(config);
