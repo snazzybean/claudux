@@ -175,32 +175,21 @@ code or signal.
 
 ## Updating
 
-Claudux checks GitHub twice a day for a newer release and puts a card at the
-bottom of the sidebar when there is one, with a link to the release notes.
-The Settings have a **System** tab for the same thing plus a button that
-checks right away.
-
-Whether the card can act on it depends on how claudux was installed:
+A new release shows up as a card at the bottom of the sidebar; the **System**
+tab in the settings has the same thing plus a button that checks right away.
 
 | | |
 |---|---|
-| From a checkout | The button pulls the release and restarts the service |
+| From a checkout | The card's button installs it and restarts the service |
 | Docker | `docker pull` and restart the container |
 | npx | The next `npx` invocation brings it along |
 
-The button needs a checkout that has no uncommitted changes and sits exactly
-on a release tag — the state the setup above leaves behind. Anything else
-still gets the card, with the reason spelled out under the disabled button;
-nothing is ever stashed or forced. It fetches, checks out the new tag, runs
-`npm ci --omit=dev` and restarts. If any of that fails, the previous commit
-and the previous `node_modules` are put back and no restart happens.
-
-Running sessions survive the restart, because they live in tmux and the unit
-sets `KillMode=process`. Terminals open in a browser need a reload — the page
-does that itself once the new version answers.
-
-Because the install skips dev dependencies, a checkout you also run the tests
-in wants an `npm install` afterwards.
+The button needs a checkout with no uncommitted changes sitting on a release
+tag — what the setup above leaves behind. Any other checkout still gets the
+card, with the reason under the disabled button. Running sessions survive the
+restart; the page reloads itself once the new version answers. It installs
+production dependencies only, so a checkout you also run the tests in wants
+an `npm install` afterwards.
 
 ## Security
 
