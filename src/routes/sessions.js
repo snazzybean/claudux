@@ -20,6 +20,7 @@ import { sanitizePaneText } from '../lib/paneText.js';
 import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch } from '../lib/sessionMeta.js';
 import { getTokenById, getAccountById, listAccounts } from '../lib/accountStore.js';
 import { writeSessionTokenFile, removeSessionTokenFile } from '../lib/sessionTokenFile.js';
+import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
 
 export function sessionsRouter(config) {
   const router = express.Router();
@@ -39,6 +40,9 @@ export function sessionsRouter(config) {
       // would be readable via `ps aux` for every local account (see
       // sessionTokenFile.js). The wrapper script deletes it on startup.
       const tokenFilePath = writeSessionTokenFile(config.dataDir, sessionId, token);
+      // Before the pane starts, not after: `claude` reads onboarding state
+      // at its own startup, right after this call.
+      ensureOnboardingCompleted();
       const args = buildNewSessionArgs({ sessionId, projectPath: project.path, tokenFilePath, resume: false });
       spawnTmux(args);
       // Only respond once the session actually exists - otherwise the
@@ -212,6 +216,8 @@ export function sessionsRouter(config) {
       // Token via a 0600 file instead of in argv - see the create route
       // above.
       const tokenFilePath = writeSessionTokenFile(config.dataDir, sessionId, token);
+      // Same placement and reasoning as the create route above.
+      ensureOnboardingCompleted();
       const args = buildNewSessionArgs({ sessionId, projectPath: project.path, tokenFilePath, resume: true });
       spawnTmux(args);
       const started = await waitForSession(sessionId);
