@@ -111,8 +111,8 @@ docker run -p 4001:4001 \
 
 Both commands follow the moving target on purpose — `main` for npx, the
 `latest` image tag, which only stable releases move. A fixed version takes a
-suffix on either: `npx github:snazzybean/claudux#v1.0.1` or
-`ghcr.io/snazzybean/claudux:v1.0.1`.
+suffix on either: `npx github:snazzybean/claudux#v1.0.2` or
+`ghcr.io/snazzybean/claudux:v1.0.2`.
 
 The volume covers the whole home directory rather than just `.claudux`,
 because Claude Code keeps the session history the list reads in `.claude`,
