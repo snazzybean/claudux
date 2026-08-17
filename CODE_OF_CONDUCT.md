@@ -24,10 +24,13 @@ anywhere else this project is being worked on.
 
 ## If something goes wrong
 
-Report it through GitHub's **Report a vulnerability** button on the
-repository's Security tab. It opens a private thread with the maintainer,
-which is the only private channel this project has — the same one
-`SECURITY.md` points at.
+Reach the maintainer through GitHub's **Report a vulnerability** button on
+the repository's Security tab. It is meant for security reports, but it is
+the only private channel this project has, and it beats saying nothing —
+open it and say plainly that this is about conduct, not a vulnerability.
+
+If you would rather not go through the maintainer at all, GitHub takes
+reports directly at https://github.com/contact/report-abuse.
 
 Expect an answer within a week. What follows is a decision: a warning, a
 removed comment, or a block from the repository, depending on what happened.
