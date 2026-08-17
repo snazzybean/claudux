@@ -7,6 +7,7 @@ import {
   readCheckoutState,
   updateReadiness,
   systemdUnit,
+  restartUnit,
 } from '../src/lib/selfUpdate.js';
 
 const ROOT = '/srv/example/claudux';
@@ -119,4 +120,37 @@ test('systemdUnit reads the unit out of the cgroup file', () => {
 test('systemdUnit returns null outside a service cgroup', () => {
   assert.equal(systemdUnit({ readFileFn: () => '0::/user.slice/session-3.scope\n' }), null);
   assert.equal(systemdUnit({ readFileFn: () => { throw new Error('ENOENT'); } }), null);
+});
+
+const cgroup = () => '0::/system.slice/claudux.service\n';
+
+test('restartUnit names the unit when this process is its main process', async () => {
+  const unit = await restartUnit({
+    readFileFn: cgroup,
+    pid: 4711,
+    runFn: async () => ({ stdout: '4711\n', stderr: '' }),
+  });
+  assert.equal(unit, 'claudux.service');
+});
+
+// The cgroup answers for every process inside the unit, including a claudux
+// started from a second checkout inside one of its own sessions. Restarting
+// on that answer alone would take down the production instance instead of
+// the one being updated - which is exactly what happened once.
+test('restartUnit refuses when another process is the main process', async () => {
+  const unit = await restartUnit({
+    readFileFn: cgroup,
+    pid: 4711,
+    runFn: async () => ({ stdout: '377031\n', stderr: '' }),
+  });
+  assert.equal(unit, null);
+});
+
+test('restartUnit refuses when systemctl cannot be asked', async () => {
+  const unit = await restartUnit({
+    readFileFn: cgroup,
+    pid: 4711,
+    runFn: async () => { throw new Error('systemctl: not found'); },
+  });
+  assert.equal(unit, null);
 });

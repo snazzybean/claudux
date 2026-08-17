@@ -2,7 +2,7 @@
 // the restart itself is not.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { run, systemdUnit } from './selfUpdate.js';
+import { run, restartUnit } from './selfUpdate.js';
 
 const ROOT_DIR = path.join(import.meta.dirname, '../..');
 const GIT_TIMEOUT_MS = 60_000;
@@ -24,7 +24,7 @@ export function createUpdateJob({
   runFn = run,
   renameFn = fs.rename,
   rmFn = removeDir,
-  unitFn = () => systemdUnit(),
+  unitFn = () => restartUnit(),
   restartFn = (unit) => run('systemctl', ['restart', '--no-block', unit]),
 } = {}) {
   const modules = path.join(rootDir, 'node_modules');
@@ -67,7 +67,7 @@ export function createUpdateJob({
       throw err;
     }
 
-    const unit = unitFn();
+    const unit = await unitFn();
     if (!unit) {
       state = { ...state, phase: 'restart-required' };
       return;

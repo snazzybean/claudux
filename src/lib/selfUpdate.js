@@ -90,3 +90,26 @@ export function systemdUnit({
     return null;
   }
 }
+
+// The unit this process may restart - null when there is none it owns.
+//
+// The cgroup alone is not enough to decide that: it answers the same for
+// every process inside the unit, including a second claudux started from
+// another checkout inside one of this one's own sessions. Acting on that
+// answer restarts the production instance rather than the one being updated,
+// which is what happened during the first acceptance run. So systemd has to
+// confirm that this process is the unit's main process.
+export async function restartUnit({
+  readFileFn = () => fs.readFileSync('/proc/self/cgroup', 'utf8'),
+  pid = process.pid,
+  runFn = run,
+} = {}) {
+  const unit = systemdUnit({ readFileFn });
+  if (!unit) return null;
+  try {
+    const { stdout } = await runFn('systemctl', ['show', unit, '-p', 'MainPID', '--value'], { timeoutMs: 10_000 });
+    return Number(stdout.trim()) === pid ? unit : null;
+  } catch {
+    return null;
+  }
+}
