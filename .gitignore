@@ -1,4 +1,9 @@
 node_modules/
+# The previous modules, kept aside by an update until the restart (see
+# src/lib/updateRun.js). Untracked here it would leave the tree dirty, and
+# the next update refuses to run on a dirty tree - one update would have
+# blocked every one after it.
+node_modules.old
 .env
 .local/
 data/

@@ -2,6 +2,8 @@
 // without the network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { createUpdateJob, cleanupOldModules } from '../src/lib/updateRun.js';
 
 const ROOT = '/srv/example/claudux';
@@ -152,6 +154,17 @@ test('a second start while one is running is rejected as busy', async () => {
   await assert.rejects(() => job.start('v1.1.0'), (err) => err.code === 'BUSY');
   release();
   await first;
+});
+
+// A successful update leaves node_modules.old behind until the restart. If
+// git saw it, the tree would be dirty and updateReadiness would refuse the
+// NEXT update - one update would have blocked every one after it.
+test('the directory left behind by an update is ignored by git', async () => {
+  const root = path.join(import.meta.dirname, '..');
+  // Without the trailing slash, the way `git status` reports it in a clone
+  // that has just been updated.
+  const check = spawnSync('git', ['check-ignore', '-q', 'node_modules.old'], { cwd: root });
+  assert.equal(check.status, 0, 'node_modules.old must be listed in .gitignore');
 });
 
 test('cleanupOldModules removes the leftover directory', async () => {
