@@ -17,9 +17,18 @@ Express server serves the interface and the API.
 > while nothing is looking at them. Reaching it from outside your own network
 > wants a reverse proxy or a VPN in front.
 
-<p align="center">
-  <img src="docs/images/desktop-sessions.png" width="720" alt="Projects and their sessions in the list on the left, a session open in the terminal on the right">
-</p>
+<div align="center">
+<table>
+  <tr>
+    <td valign="top">
+      <img src="docs/images/desktop-sessions.png" width="620" alt="Projects and their sessions in the list on the left, a session open in the terminal on the right">
+    </td>
+    <td valign="top">
+      <img src="docs/images/mobile-session.png" width="215" alt="The same session on a phone, with the key bar below the terminal">
+    </td>
+  </tr>
+</table>
+</div>
 
 ## What it does
 
