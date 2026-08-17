@@ -2192,6 +2192,30 @@ button { cursor: pointer; }
    restless there. They now live behind a single, understated button - the
    sidebar carries only what's needed constantly: search and project
    list. */
+/* A card, not a control: the same treatment as .session-row - blended fill,
+   no border, the shared shadow. The button inside it carries .btn-surface. */
+.update-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 12px 8px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-hover); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
+  box-shadow: var(--glass-card);
+}
+.update-card[hidden] { display: none; }
+.update-head { display: flex; align-items: center; gap: 6px; }
+.update-title { font-size: var(--fs-ui); font-weight: 600; }
+.update-notes { margin-left: auto; font-size: var(--fs-meta); color: var(--text-muted); }
+.update-notes[hidden] { display: none; }
+.update-btn { width: 100%; }
+.update-btn:disabled { opacity: 0.6; cursor: default; }
+.update-reason { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); line-height: 1.35; }
+.update-reason[hidden] { display: none; }
+
 .sidebar-foot {
   flex: 0 0 auto;
   padding: 8px 12px;
@@ -2723,6 +2747,19 @@ button { cursor: pointer; }
    as not to offer two mechanisms for the same thing. */
 .app[data-sidebar="collapsed"] .shell { grid-template-columns: 60px 1fr; }
 .app[data-sidebar="collapsed"] .sidebar-body { display: none; }
+/* The update card folds away with .sidebar-body, so the dot moves to the one
+   button still on screen - which is also the way back to the card. */
+.sidebar-toggle { position: relative; }
+.app[data-sidebar="collapsed"] .sidebar-toggle.has-update::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 .app[data-sidebar="collapsed"] .sidebar-head { flex-direction: column; padding: 10px 6px; }
 .app[data-sidebar="collapsed"] .sidebar-head-actions { flex-direction: column; }
 .app[data-sidebar="collapsed"] .wordmark { display: none; }
@@ -2825,6 +2862,9 @@ button { cursor: pointer; }
      second toggle mechanism would only be confusing. */
   .sidebar-toggle { display: none; }
   .app[data-sidebar="collapsed"] .sidebar-body { display: flex; }
+  /* The card is visible here even when collapsed, so the dot would say the
+     same thing twice. */
+  .app[data-sidebar="collapsed"] .sidebar-toggle.has-update::after { display: none; }
   /* On mobile, data-view handles showing and hiding the whole sidebar; a
      narrow strip alongside it would be a second mechanism for the same
      thing. */

@@ -75,6 +75,20 @@
             <input class="search-input" id="searchInput" placeholder="Search projects & sessions…" />
           </div>
           <div class="project-list" id="projectList"></div>
+          <!-- Only shown once a newer release actually exists. Above the
+               foot rather than inside it: that row is a flex line for its
+               two buttons, and a third child would sit beside them. On a
+               phone this is where the thumb is, the sidebar being the
+               first view. -->
+          <div class="update-card" id="updateCard" hidden>
+            <div class="update-head">
+              <svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 13.5v-8"/><path d="M5 8.5 8 5.5l3 3"/><path d="M3.5 3h9"/></svg>
+              <span class="update-title" id="updateTitle"></span>
+              <a class="update-notes" id="updateNotes" href="#" target="_blank" rel="noreferrer noopener">What's new</a>
+            </div>
+            <button class="btn-surface btn-lift update-btn" id="updateBtn" type="button">Update &amp; restart</button>
+            <p class="update-reason" id="updateReason" hidden></p>
+          </div>
           <div class="sidebar-foot">
             <button class="btn-surface btn-lift manage-toggle" id="manageToggle" type="button">Manage folders</button>
             <!-- Opens the same window as the button next to it, just on a
@@ -285,6 +299,7 @@
       <button class="manage-tab" type="button" role="tab" data-tab="accounts" aria-selected="false">Accounts</button>
       <button class="manage-tab" type="button" role="tab" data-tab="sessions" aria-selected="false">Sessions</button>
       <button class="manage-tab" type="button" role="tab" data-tab="access" aria-selected="false">Access</button>
+      <button class="manage-tab" type="button" role="tab" data-tab="system" aria-selected="false">System</button>
     </div>
     <div class="manage-body">
       <section class="manage-pane" data-pane="appearance">
@@ -495,6 +510,18 @@
 
         </div>
       </div>
+      </section>
+
+      <!-- Named System rather than About: diagnosis and logs would belong
+           here later, next to the version. -->
+      <section class="manage-pane" data-pane="system" hidden>
+        <div class="settings-section">
+          <div class="settings-section-head">Version</div>
+          <p class="settings-hint" id="systemVersion"></p>
+          <p class="settings-hint" id="systemChecked"></p>
+          <p class="settings-hint" id="systemReason" hidden></p>
+          <button class="btn-surface btn-lift" id="systemCheckBtn" type="button">Check for updates</button>
+        </div>
       </section>
     </div>
   </dialog>

@@ -19,6 +19,9 @@ export const ICONS = {
   image: '<rect x="2.5" y="3.5" width="11" height="9" rx="1"/><circle cx="6" cy="6.5" r="1"/><path d="M3 11l3-3 2.5 2.5L11 8l2 2"/>',
   reload: '<path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9"/><path d="M13.5 2.5V5H11"/>',
   download: '<path d="M8 2.5v8"/><path d="M5 7.5 8 10.5l3-3"/><path d="M3 13h10"/>',
+  // The arrow points at a line rather than away from one: pulling a new
+  // version up, not saving a file down.
+  update: '<path d="M8 13.5v-8"/><path d="M5 8.5 8 5.5l3 3"/><path d="M3.5 3h9"/>',
   share: '<path d="M8 10.5v-8"/><path d="M5 5.5 8 2.5l3 3"/><path d="M3.5 8.5v4a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-4"/>',
   pencil: '<path d="M11.2 2.8a1.4 1.4 0 0 1 2 2L5.6 12.4 3 13l.6-2.6z"/>',
   // Window with a prompt instead of a monitor-on-a-stand: this means the
