@@ -4,17 +4,20 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
-  packages: write
-
 jobs:
+  # Permissions are per job, not workflow-wide: a called workflow inherits
+  # the caller's token, and this one installs npm packages - third-party
+  # lifecycle scripts have no business holding a token that can push.
   test:
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   release:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -34,9 +37,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
 
+  # Behind release, not beside it: as a sibling this job would push an image
+  # for a tag the version gate has just rejected.
   image:
-    needs: test
+    needs: [test, release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +57,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # A hyphen in the tag is semver's prerelease marker (v1.1.0-rc1), and
+      # `latest` has to keep pointing at the newest stable image - a release
+      # candidate taking it would reach everyone who omits a tag.
+      - name: Tags for this build
+        id: image_tags
+        run: |
+          tags="ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME}"
+          case "$GITHUB_REF_NAME" in
+            *-*) echo "prerelease tag - :latest stays where it is" ;;
+            *) tags="$(printf '%s\n%s' "$tags" "ghcr.io/${GITHUB_REPOSITORY}:latest")" ;;
+          esac
+          {
+            echo 'tags<<TAGS_EOF'
+            echo "$tags"
+            echo 'TAGS_EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "$tags"
+
       # arm64 is not optional: without it the image only runs emulated on
       # an Apple Silicon Mac.
       - uses: docker/build-push-action@v6
@@ -56,6 +82,4 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.image_tags.outputs.tags }}
