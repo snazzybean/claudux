@@ -107,7 +107,8 @@ test: cover the /clear chain in sessionMeta
 3. Run `npm run lint`.
 
    Every push and pull request runs `npm run lint` and `npm test` on GitHub
-   Actions (`.github/workflows/ci.yml`). A red run blocks nothing
+   Actions, and builds the container image for `linux/amd64` without
+   pushing it (`.github/workflows/ci.yml`). A red run blocks nothing
    automatically — it is on you to read it.
 4. Submit a PR with a clear description of what changed and why.
 

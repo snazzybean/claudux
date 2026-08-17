@@ -151,8 +151,8 @@ configured in your shell.
 
 ### Configuration
 
-All values come from the environment; `.env.example` lists them all, with the
-default noted on each one it does not set:
+All values come from the environment; `.env.example` lists every variable,
+with the defaults in the comments:
 
 | Variable | Meaning |
 |---|---|
