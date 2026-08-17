@@ -99,12 +99,16 @@ export async function killSessionEventually(name, attempts = 20, delayMs = 100) 
 // Lets one child of the tmux server exit, to hand the server a SIGCHLD it
 // cannot have missed. No `-t`: run-shell forks its child without one, and a
 // target would be the single unchecked value in this file.
-function provokeSigchld() {
+export function provokeSigchld() {
   return new Promise((resolve) => {
     const proc = spawn('tmux', ['run-shell', 'true']);
     proc.on('close', () => resolve());
     proc.on('error', () => resolve());
   });
+}
+
+export function readPaneEntry(sessionId) {
+  return listTmuxSessions().then((sessions) => sessions.find((s) => s.name === sessionId));
 }
 
 // `pane_dead` follows the pane's fd closing, while pane_dead_status and
@@ -120,8 +124,15 @@ function provokeSigchld() {
 // after the plain wait, so a pane that reports on its own never pays for it,
 // and bounded, so a pane that genuinely has no cause of death still fails -
 // with the whole entry, which is what tells the two apart.
-export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100, flushes = 3 } = {}) {
-  const read = async () => (await listTmuxSessions()).find((s) => s.name === sessionId);
+//
+// readFn and flushFn are seams: the flush branch only runs where the
+// notification actually goes missing - which is CI, not every host - so
+// test/routeHarness.test.js drives both outcomes through them.
+export async function waitForPaneDeath(sessionId, {
+  attempts = 30, delayMs = 100, flushes = 3,
+  readFn = readPaneEntry, flushFn = provokeSigchld,
+} = {}) {
+  const read = () => readFn(sessionId);
   const reported = (e) => e?.dead && (e.deadStatus !== null || e.deadSignal !== null);
   let entry;
   for (let i = 0; i < attempts; i++) {
@@ -130,7 +141,7 @@ export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100
     await new Promise((r) => setTimeout(r, delayMs));
   }
   for (let i = 0; i < flushes; i++) {
-    await provokeSigchld();
+    await flushFn();
     entry = await read();
     if (reported(entry)) return entry;
     await new Promise((r) => setTimeout(r, delayMs));
