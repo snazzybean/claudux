@@ -104,8 +104,9 @@ export async function killSessionEventually(name, attempts = 20, delayMs = 100) 
 // The wait is bounded and dumps the entry, because the two ways it can run
 // out need telling apart: a pane that died the other way carries the field
 // the caller is not looking at, while a pane with neither field means tmux
-// has not reaped its child - which on a loaded GitHub runner it may never
-// do (see the task-4 report). Waiting longer does not help there.
+// has not reaped its child. On a loaded GitHub runner that can hold until
+// some other child of the same tmux server exits, so waiting alone does not
+// help - see the task-4 report.
 export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100 } = {}) {
   let entry;
   for (let i = 0; i < attempts; i++) {
@@ -114,44 +115,6 @@ export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100
     await new Promise((r) => setTimeout(r, delayMs));
   }
   throw new Error(`pane of ${sessionId} did not report a cause of death: ${JSON.stringify(entry)}`);
-}
-
-// TEMPORARY experiment, removed once its answer is recorded. Signals do not
-// queue: a SIGCHLD that arrives while tmux is between waitpid calls is
-// dropped, and tmux reaps in a waitpid(-1, WNOHANG) loop - so a zombie left
-// behind that way would be collected by the NEXT SIGCHLD, along with its
-// wait status. `tmux run-shell` forks a child of the server, so letting one
-// exit produces exactly that next SIGCHLD.
-//
-// No `-t`: the target would be the one unchecked value in here, and
-// run-shell needs none to fork its child.
-async function flushProbe(sessionId, pid) {
-  const run = (cmd, args) => new Promise((resolve) => {
-    const proc = spawn(cmd, args);
-    let out = '';
-    proc.stdout.on('data', (d) => (out += d));
-    proc.stderr.on('data', (d) => (out += d));
-    proc.on('close', (code) => resolve(`exit ${code}: ${out.trim()}`));
-    proc.on('error', (e) => resolve(`spawn failed: ${e.message}`));
-  });
-  const stat = (label) => run('sh', ['-c', `ps -o stat= -p ${pid} 2>&1 | tr -d ' \\n'; echo " (${label})"`]);
-  const before = (await listTmuxSessions()).find((s) => s.name === sessionId);
-  const zombieBefore = await stat('before');
-  const shell = await run('tmux', ['run-shell', 'true']);
-  const samples = [];
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 100));
-    const late = (await listTmuxSessions()).find((s) => s.name === sessionId);
-    samples.push(late);
-    if (late?.deadStatus !== null || late?.deadSignal !== null) break;
-  }
-  const zombieAfter = await stat('after');
-  console.error([
-    `FLUSH ${sessionId}: pid ${pid}`,
-    `FLUSH before: ${JSON.stringify(before)} ${zombieBefore.trim()}`,
-    `FLUSH run-shell: ${shell}`,
-    `FLUSH after ${samples.length * 100}ms: ${JSON.stringify(samples.at(-1))} ${zombieAfter.trim()}`,
-  ].join('\n'));
 }
 
 // A crash in production is the pane's process dying while the tmux session
@@ -165,14 +128,7 @@ export async function crashPaneProcess(sessionId, { signal = 'SIGKILL' } = {}) {
   });
   assert.ok(pid, 'precondition: the pane PID was read');
   process.kill(Number(pid), signal);
-  let entry;
-  try {
-    entry = await waitForPaneDeath(sessionId);
-  } catch (err) {
-    // TEMPORARY experiment, removed once its answer is recorded.
-    await flushProbe(sessionId, pid);
-    throw err;
-  }
+  const entry = await waitForPaneDeath(sessionId);
   // An exit status instead of a signal means the pane process was already
   // gone when the kill above landed. Caught here, with the whole entry, so
   // it doesn't reach the callers as a bare `null !== 9` on the signal.
