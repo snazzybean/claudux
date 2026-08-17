@@ -96,22 +96,43 @@ export async function killSessionEventually(name, attempts = 20, delayMs = 100) 
   }
 }
 
+// Lets one child of the tmux server exit, to hand the server a SIGCHLD it
+// cannot have missed. No `-t`: run-shell forks its child without one, and a
+// target would be the single unchecked value in this file.
+function provokeSigchld() {
+  return new Promise((resolve) => {
+    const proc = spawn('tmux', ['run-shell', 'true']);
+    proc.on('close', () => resolve());
+    proc.on('error', () => resolve());
+  });
+}
+
 // `pane_dead` follows the pane's fd closing, while pane_dead_status and
 // pane_dead_signal only exist once tmux has reaped the pane's process - so
 // a pane can be listed as dead with no cause of death on it. Every caller
 // here asserts on that cause, so this is what they have to wait for.
 //
-// The wait is bounded and dumps the entry, because the two ways it can run
-// out need telling apart: a pane that died the other way carries the field
-// the caller is not looking at, while a pane with neither field means tmux
-// has not reaped its child. On a loaded GitHub runner that can hold until
-// some other child of the same tmux server exits, so waiting alone does not
-// help - see the task-4 report.
-export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100 } = {}) {
+// The reap needs a SIGCHLD, and one can go missing: signals don't queue, so
+// a second child dying while tmux is inside its waitpid(-1, WNOHANG) loop
+// leaves no notification behind, and that pane keeps its wait status
+// unrequested for as long as nothing else exits. Provoking the next SIGCHLD
+// makes the same loop collect the backlog together with its status. Only
+// after the plain wait, so a pane that reports on its own never pays for it,
+// and bounded, so a pane that genuinely has no cause of death still fails -
+// with the whole entry, which is what tells the two apart.
+export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100, flushes = 3 } = {}) {
+  const read = async () => (await listTmuxSessions()).find((s) => s.name === sessionId);
+  const reported = (e) => e?.dead && (e.deadStatus !== null || e.deadSignal !== null);
   let entry;
   for (let i = 0; i < attempts; i++) {
-    entry = (await listTmuxSessions()).find((s) => s.name === sessionId);
-    if (entry?.dead && (entry.deadStatus !== null || entry.deadSignal !== null)) return entry;
+    entry = await read();
+    if (reported(entry)) return entry;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  for (let i = 0; i < flushes; i++) {
+    await provokeSigchld();
+    entry = await read();
+    if (reported(entry)) return entry;
     await new Promise((r) => setTimeout(r, delayMs));
   }
   throw new Error(`pane of ${sessionId} did not report a cause of death: ${JSON.stringify(entry)}`);
