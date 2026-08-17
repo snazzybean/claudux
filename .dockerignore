@@ -7,3 +7,17 @@ data/
 docs/
 test/
 *.log
+
+# The in-house working documents. They are untracked, so a fresh checkout in
+# CI never sees them - but a build in a working checkout would copy them into
+# an image made for distribution, and they name the machine they were written
+# on.
+CLAUDE.md
+TODO.md
+GITHUB-READINESS.md
+OPEN-DECISIONS.md
+.superpowers/
+.claude/
+.local/
+/test-*.txt
+/temp-*
