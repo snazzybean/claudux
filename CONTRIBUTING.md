@@ -125,5 +125,14 @@ about them.
 
 ## Reporting Issues
 
-Use [GitHub Issues](https://github.com/snazzybean/claudux/issues) with a
-clear description of what you expected and what happened instead.
+Bugs go into [GitHub Issues](https://github.com/snazzybean/claudux/issues),
+where a template asks for the environment details that usually decide the
+answer. Ideas and setup questions go into
+[Discussions](https://github.com/snazzybean/claudux/discussions) instead —
+they can be discussed there before anything gets built.
+
+Anything that gets past the login or leaks a token goes into a private
+advisory, not into either of those. `SECURITY.md` has the details.
+
+Whichever you use: an issue is public and the terminal output you paste
+carries tokens, hostnames and paths. Redact before posting.

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feature request or idea
+    url: https://github.com/snazzybean/claudux/discussions/categories/ideas
+    about: Ideas belong in Discussions, where they can be discussed and voted on before anything is built.
+  - name: Question or setup help
+    url: https://github.com/snazzybean/claudux/discussions/categories/q-a
+    about: For anything that might just be a misconfiguration, ask in Q&A first.
+  - name: Security vulnerability
+    url: https://github.com/snazzybean/claudux/security/advisories/new
+    about: A session is a shell. Anything that gets past the login goes into a private advisory, not into a public issue.

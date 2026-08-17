@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a bug in Claudux
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you paste anything: a Claudux session is a shell with a Claude
+        Code account token attached. Redact tokens (`sk-ant-…`), passwords,
+        hostnames and the contents of your `.env` — issues are public.
+
+        Found something that gives access to a shell? Don't open an issue.
+        Use **Report a vulnerability** on the Security tab instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: Claudux version
+      description: The release tag you installed, or `git rev-parse --short HEAD` in the checkout.
+      placeholder: "v1.0.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - git clone + npm install
+        - npx github:snazzybean/claudux
+        - Docker image (ghcr.io)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node, tmux, ttyd
+      description: Output of `node -v`, `tmux -V` and `ttyd --version`, plus your OS. Windows is not supported.
+      placeholder: "Debian 13, Node 22.15.0, tmux 3.5a, ttyd 1.7.7"
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: Browser and device
+      description: Relevant for anything involving the terminal, the keyboard bar, pasting or the layout.
+      placeholder: "Safari on iOS 18, iPhone 15"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead? Since when, or after which change?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the project ...
+        2. Start a session ...
+        3. See ...
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup around it
+      description: |
+        Anything that sits between you and Claudux, and how it is configured:
+        reverse proxy or VPN in front, `AUTH_ENABLED`, whether notifications
+        are on, whether the project directory lives outside the checkout.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        From `journalctl -u claudux` or the terminal Claudux runs in, plus the
+        browser console (F12) for anything visual. Check what you paste for
+        tokens and hostnames first.
+      render: text
