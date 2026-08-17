@@ -105,6 +105,10 @@ test: cover the /clear chain in sessionMeta
 2. Make your changes. `npm test` is green and the working tree is clean
    before every commit — the project is built test-driven.
 3. Run `npm run lint`.
+
+   Every push and pull request runs `npm run lint` and `npm test` on GitHub
+   Actions (`.github/workflows/ci.yml`). A red run blocks nothing
+   automatically — it is on you to read it.
 4. Submit a PR with a clear description of what changed and why.
 
 ## Secrets

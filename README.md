@@ -89,7 +89,38 @@ shipped unit does, and running as root gives that shell the whole machine.
 
 ## Setup
 
+To use it, one command:
+
 ```sh
+npx github:snazzybean/claudux
+```
+
+A fixed version takes a suffix: `npx github:snazzybean/claudux#v1.0.0`.
+tmux, ttyd and the Claude Code CLI stay prerequisites — if one is missing,
+installing it is offered, never done unasked.
+
+Just to look at it, installing nothing:
+
+```sh
+docker run -p 4001:4001 \
+  -v claudux:/home/claudux \
+  -v ~/code:/projects \
+  ghcr.io/snazzybean/claudux:v1.0.0
+```
+
+The volume covers the whole home directory rather than just `.claudux`,
+because Claude Code keeps the session history the list reads in `.claude`,
+right beside it.
+
+Sessions then run **inside the container**, not on your machine — without
+your compilers, language versions or credentials. For actual work, npx is
+the way.
+
+To develop on it, the checkout:
+
+```sh
+git clone https://github.com/snazzybean/claudux.git
+cd claudux
 npm install
 npm run setup
 npm start
@@ -118,7 +149,7 @@ All values come from the environment; `.env.example` shows the defaults:
 | `PORT` | port of the Express server |
 | `HOST` | interface it binds to, `0.0.0.0` by default (see Security) |
 | `CLAUDE_HOME` | Claude Code's directory, source of session histories |
-| `DATA_DIR` | project list and session metadata |
+| `DATA_DIR` | project list and session metadata, **outside** the checkout by default |
 | `AUTH_ENABLED` | the login, on unless set to `false` (see Security) |
 | `ACCESS_SECRET_PATH` | site password and sessions, **outside** the checkout |
 | `ACCOUNTS_SECRET_PATH` | account tokens, **outside** the checkout |
