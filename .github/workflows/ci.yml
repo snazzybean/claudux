@@ -58,6 +58,8 @@ jobs:
   # found after the fact. Here it is built on every push and pull request.
   image:
     runs-on: ubuntu-latest
+    # The build takes well under a minute, so this is the cap on a hanging
+    # fetch - apt, the ttyd release and npm all pull from the network here.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
