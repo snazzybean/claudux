@@ -96,14 +96,16 @@ export async function killSessionEventually(name, attempts = 20, delayMs = 100) 
   }
 }
 
-// tmux fills `pane_dead` from the pane's fd closing and the two death
-// fields from the SIGCHLD for its process - two separate events, in no
-// guaranteed order. So a pane can already be listed as dead while
-// pane_dead_status and pane_dead_signal are both still empty, and waiting
-// for `dead` alone hands back an entry whose cause of death is missing.
-// Every caller here asserts on that cause, so this is what they have to
-// wait for. The entry goes into the timeout message: without it a wait that
-// runs out cannot be told apart from a pane that died the other way.
+// `pane_dead` follows the pane's fd closing, while pane_dead_status and
+// pane_dead_signal only exist once tmux has reaped the pane's process - so
+// a pane can be listed as dead with no cause of death on it. Every caller
+// here asserts on that cause, so this is what they have to wait for.
+//
+// The wait is bounded and dumps the entry, because the two ways it can run
+// out need telling apart: a pane that died the other way carries the field
+// the caller is not looking at, while a pane with neither field means tmux
+// has not reaped its child - which on a loaded GitHub runner it may never
+// do (see the task-4 report). Waiting longer does not help there.
 export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100 } = {}) {
   let entry;
   for (let i = 0; i < attempts; i++) {
@@ -112,40 +114,6 @@ export async function waitForPaneDeath(sessionId, { attempts = 30, delayMs = 100
     await new Promise((r) => setTimeout(r, delayMs));
   }
   throw new Error(`pane of ${sessionId} did not report a cause of death: ${JSON.stringify(entry)}`);
-}
-
-// TEMPORARY diagnostic, to be removed once the cause is established. Splits
-// "tmux never reaped the child" (the pid is still a zombie) from "tmux
-// reaped it but did not record it on the pane" (the pid is gone), and shows
-// whether the fields arrive at all when given far longer than the wait
-// above allows.
-async function diagnoseLostDeath(sessionId, pid) {
-  const run = (cmd, args) => new Promise((resolve) => {
-    const proc = spawn(cmd, args);
-    let out = '';
-    proc.stdout.on('data', (d) => (out += d));
-    proc.stderr.on('data', (d) => (out += d));
-    proc.on('close', () => resolve(out.trim()));
-    proc.on('error', (e) => resolve(`spawn failed: ${e.message}`));
-  });
-  const serverPid = (await run('tmux', ['display-message', '-p', '#{pid}'])).trim();
-  const procStat = await run('sh', ['-c', `ps -o pid=,ppid=,stat=,comm= -p ${pid} 2>&1`]);
-  const serverState = await run('sh', ['-c',
-    `grep -E '^(Sig|Thread|State)' /proc/${serverPid}/status 2>&1; echo "--- children of ${serverPid}:"; ps --ppid ${serverPid} -o pid=,stat=,comm= 2>&1 | sort -k2 | head -40`]);
-  const panes = await run('tmux', ['list-panes', '-a', '-F',
-    '#{session_name} w#{window_index} pid=#{pane_pid} dead=#{pane_dead} status=#{pane_dead_status} signal=#{pane_dead_signal}']);
-  console.error(`DIAG ${sessionId}: killed pid ${pid}, tmux server ${serverPid}\nDIAG proc: ${procStat}\nDIAG server:\n${serverState}\nDIAG panes:\n${panes}`);
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    const late = (await listTmuxSessions()).find((s) => s.name === sessionId);
-    if (late?.deadStatus !== null || late?.deadSignal !== null) {
-      console.error(`DIAG ${sessionId}: fields arrived after ${(i + 1) * 500}ms extra: ${JSON.stringify(late)}`);
-      return;
-    }
-  }
-  const after = await run('sh', ['-c',
-    `grep -E '^Sig' /proc/${serverPid}/status 2>&1; ps -o pid=,stat= -p ${pid} 2>&1`]);
-  console.error(`DIAG ${sessionId}: fields still empty after 20s extra\nDIAG after:\n${after}`);
 }
 
 // A crash in production is the pane's process dying while the tmux session
@@ -159,14 +127,7 @@ export async function crashPaneProcess(sessionId, { signal = 'SIGKILL' } = {}) {
   });
   assert.ok(pid, 'precondition: the pane PID was read');
   process.kill(Number(pid), signal);
-  let entry;
-  try {
-    entry = await waitForPaneDeath(sessionId);
-  } catch (err) {
-    // TEMPORARY diagnostic, to be removed once the cause is established.
-    await diagnoseLostDeath(sessionId, pid);
-    throw err;
-  }
+  const entry = await waitForPaneDeath(sessionId);
   // An exit status instead of a signal means the pane process was already
   // gone when the kill above landed. Caught here, with the whole entry, so
   // it doesn't reach the callers as a bare `null !== 9` on the signal.
