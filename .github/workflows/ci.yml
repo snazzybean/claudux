@@ -9,6 +9,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The suite takes about half a minute, so this is the cap on a stuck
+    # run, not a budget for a slow one.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

@@ -95,9 +95,10 @@ To use it, one command:
 npx github:snazzybean/claudux
 ```
 
-A fixed version takes a suffix: `npx github:snazzybean/claudux#v1.0.0`.
-tmux, ttyd and the Claude Code CLI stay prerequisites — if one is missing,
-installing it is offered, never done unasked.
+tmux and ttyd stay prerequisites — if one is missing, installing it is
+offered, never done unasked. The Claude Code CLI is reported when it is
+missing and installed separately, the way its own
+[documentation](https://docs.claude.com/claude-code) describes.
 
 Just to look at it, installing nothing:
 
@@ -105,8 +106,13 @@ Just to look at it, installing nothing:
 docker run -p 4001:4001 \
   -v claudux:/home/claudux \
   -v ~/code:/projects \
-  ghcr.io/snazzybean/claudux:v1.0.0
+  ghcr.io/snazzybean/claudux:latest
 ```
+
+Both commands follow the moving target on purpose — `main` for npx, the
+`latest` image tag, which only stable releases move. A fixed version takes a
+suffix on either: `npx github:snazzybean/claudux#v1.0.0` or
+`ghcr.io/snazzybean/claudux:v1.0.0`.
 
 The volume covers the whole home directory rather than just `.claudux`,
 because Claude Code keeps the session history the list reads in `.claude`,
@@ -126,23 +132,27 @@ npm run setup
 npm start
 ```
 
-Then open `http://localhost:4001` and pick a password on the screen that
-comes up. Do that before the machine's other addresses see traffic — the
-first caller sets it. From then on the same interface answers on every
-address of the machine; `HOST` narrows that down, see Security above.
+Only this last path has `npm run setup`: it looks for tmux and ttyd, offers
+to install what is missing via the detected package manager (it asks first,
+and outside Homebrew the install runs through `sudo`), says whether the
+Claude Code CLI is there, and creates `.env` from `.env.example`.
 
-`npm run setup` checks for tmux, ttyd and the Claude Code CLI, offers to
-install missing packages via the detected package manager (it asks first, and
-outside Homebrew the install runs through `sudo`) and creates `.env` from
-`.env.example`. `npm start` then runs Express, its own ttyd child and the
-idle-session reaper as one process, with ttyd bound to `127.0.0.1` behind
-Claudux's `/ttyd/*` proxy. One external route covers both the app and the
-terminal, and the UTF-8 locale both need is picked per platform instead of
-being configured in your shell.
+Whichever of the three you took, open `http://localhost:4001` and pick a
+password on the screen that comes up. Do that before the machine's other
+addresses see traffic — the first caller sets it. From then on the same
+interface answers on every address of the machine; `HOST` narrows that down,
+see Security above.
+
+Behind that one port sit Express, its own ttyd child and the idle-session
+reaper as a single process, with ttyd bound to `127.0.0.1` behind Claudux's
+`/ttyd/*` proxy. One external route covers both the app and the terminal,
+and the UTF-8 locale both need is picked per platform instead of being
+configured in your shell.
 
 ### Configuration
 
-All values come from the environment; `.env.example` shows the defaults:
+All values come from the environment; `.env.example` lists them all, with the
+default noted on each one it does not set:
 
 | Variable | Meaning |
 |---|---|
