@@ -1,6 +1,6 @@
 {
   "name": "claudux",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Web interface for running Claude Code sessions from a browser, phone included - tmux keeps the sessions alive, ttyd brings them into the browser.",
   "author": "snazzybean",
   "license": "MIT",
