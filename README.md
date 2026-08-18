@@ -152,6 +152,7 @@ installation:
 | `PUBLIC_BASE_URL` | base for the notification's click-through link, unset by default — the one value worth setting by hand |
 | `VAPID_KEYS_PATH` | browser-push keypair, generated on first use, **outside** the checkout; deleting it unsubscribes every device |
 | `VAPID_SUBJECT` | `sub` claim of the push token; falls back to `PUBLIC_BASE_URL`'s origin, then to this repository's url |
+| `CLAUDE_UPDATE_SETTINGS_PATH` | Claude Code auto-update toggle, **outside** the checkout |
 | `TTYD_PORT` | port the bundled ttyd child listens on |
 | `TTYD_BIN` | path to the ttyd binary, if not on `PATH` |
 

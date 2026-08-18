@@ -75,6 +75,16 @@ test('GET reports failed when the last run errored', async () => {
   s.close();
 });
 
+test('GET includes the error message when the last run failed', async () => {
+  const s = serve({
+    job: jobStub({ status: { phase: 'failed', updated: null, from: '2.1.226', to: null, error: 'boom', ranAt: 1000 } }),
+  });
+  const body = await (await fetch(s.base)).json();
+
+  assert.equal(body.error, 'boom');
+  s.close();
+});
+
 test('POST starts the job', async () => {
   const job = jobStub();
   const s = serve({ job });

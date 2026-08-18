@@ -40,20 +40,34 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Most notifications link back into this same origin, but the Claude Code
+// update notification links to its GitHub release page instead - navigate()
+// on an already-open window cannot leave the origin, so that case always
+// needs a new window/tab rather than the focus+navigate path below.
+function isSameOrigin(target) {
+  try {
+    return new URL(target, self.location.href).origin === self.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const target = event.notification.data?.url || '/';
   event.waitUntil((async () => {
-    // Focus what is already open instead of opening another window: every tap
-    // would otherwise spawn a second PWA window.
-    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const client of windows) {
-      if ('focus' in client) {
-        await client.focus();
-        // navigate() can reject for a detached or cross-origin client, and
-        // being focused on the right app beats failing the whole handler.
-        if ('navigate' in client) await client.navigate(target).catch(() => {});
-        return;
+    if (isSameOrigin(target)) {
+      // Focus what is already open instead of opening another window: every
+      // tap would otherwise spawn a second PWA window.
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of windows) {
+        if ('focus' in client) {
+          await client.focus();
+          // navigate() can reject for a detached client, and being focused
+          // on the right app beats failing the whole handler.
+          if ('navigate' in client) await client.navigate(target).catch(() => {});
+          return;
+        }
       }
     }
     await self.clients.openWindow(target);

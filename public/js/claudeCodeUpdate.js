@@ -3,7 +3,7 @@
 // like update.js's - a background install here never needs one, so there
 // is nothing to poll beyond the one request while it runs.
 import {
-  claudeCodeVersionEl, claudeCodeCheckedEl, claudeCodeNotesEl,
+  claudeCodeVersionEl, claudeCodeCheckedEl, claudeCodeReasonEl, claudeCodeNotesEl,
   claudeCodeCheckBtnEl, claudeCodeAutoToggleEl,
 } from './dom.js';
 
@@ -24,6 +24,9 @@ function render(info) {
   claudeCodeCheckedEl.textContent = info.lastRunAt
     ? `Last checked ${new Date(info.lastRunAt).toLocaleString()}`
     : 'Not checked yet';
+  const failed = info.lastResult === 'failed';
+  claudeCodeReasonEl.hidden = !failed;
+  claudeCodeReasonEl.textContent = failed ? (info.error ?? 'The last check failed.') : '';
   claudeCodeNotesEl.hidden = !info.current;
   if (info.current) claudeCodeNotesEl.href = `https://github.com/anthropics/claude-code/releases/tag/v${info.current}`;
   claudeCodeAutoToggleEl.checked = info.autoUpdateEnabled;

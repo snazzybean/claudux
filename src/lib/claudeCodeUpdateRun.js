@@ -17,6 +17,14 @@ export function releaseUrl(version) {
   return `https://github.com/anthropics/claude-code/releases/tag/v${version}`;
 }
 
+// The interval's own tick handler never sees this - execute() catches every
+// failure into `state` instead of letting it escape - so this is the only
+// place a real `claude update` failure ever reaches the log.
+function fail(error, { from = null } = {}) {
+  console.error('claudeCodeUpdate: pass failed:', error);
+  return { phase: 'failed', updated: null, from, to: null, error, ranAt: Date.now() };
+}
+
 export function createClaudeCodeUpdateJob({
   runFn = run,
   versionFn = readClaudeCodeVersion,
@@ -37,14 +45,14 @@ export function createClaudeCodeUpdateJob({
     try {
       before = await versionFn({ runFn });
     } catch (err) {
-      state = { phase: 'failed', updated: null, from: null, to: null, error: err.message, ranAt: Date.now() };
+      state = fail(err.message);
       return;
     }
 
     try {
       await runFn('claude', ['update'], { cwd: os.homedir(), timeoutMs });
     } catch (err) {
-      state = { phase: 'failed', updated: null, from: before, to: null, error: err.message, ranAt: Date.now() };
+      state = fail(err.message, { from: before });
       return;
     }
 
@@ -52,14 +60,11 @@ export function createClaudeCodeUpdateJob({
     try {
       after = await versionFn({ runFn });
     } catch (err) {
-      state = { phase: 'failed', updated: null, from: before, to: null, error: err.message, ranAt: Date.now() };
+      state = fail(err.message, { from: before });
       return;
     }
     if (after === null) {
-      state = {
-        phase: 'failed', updated: null, from: before, to: null,
-        error: 'claude --version did not answer after the update', ranAt: Date.now(),
-      };
+      state = fail('claude --version did not answer after the update', { from: before });
       return;
     }
 

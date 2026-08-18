@@ -28,6 +28,7 @@ export function claudeUpdateRouter(config, {
         autoUpdateEnabled: readAutoUpdateEnabled(config.claudeUpdateSettingsPath),
         lastRunAt: job.status().ranAt,
         lastResult: lastResult(),
+        error: job.status().error,
       });
     } catch (err) { next(err); }
   });
