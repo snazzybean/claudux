@@ -41,17 +41,16 @@ test('GET /api/browse works when the start directory is reached through a symlin
   }
 });
 
-test('GET /api/browse without a path lists the home directory by default', async () => {
+test('GET /api/browse without a path lists the filesystem root by default', async () => {
   const server = createApp(tmpConfig()).listen(0);
   const { port } = server.address();
 
   const res = await fetch(`http://127.0.0.1:${port}/api/browse`);
   const body = await res.json();
-  const realHome = fs.realpathSync(os.homedir());
 
   assert.equal(res.status, 200);
-  assert.equal(body.path, realHome);
-  assert.equal(body.parent, path.dirname(realHome));
+  assert.equal(body.path, '/');
+  assert.equal(body.parent, null);
   assert.ok(Array.isArray(body.dirs));
   server.close();
 });

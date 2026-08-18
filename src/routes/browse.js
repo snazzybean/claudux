@@ -4,10 +4,12 @@
 // only make clicking around less useful than typing, not safer.
 import express from 'express';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-export function browseRouter({ startDirFn = () => os.homedir() } = {}) {
+// The filesystem root, not $HOME: a self-hosted install's actual project
+// folders are as likely to sit under /srv or /var/www as under $HOME, and
+// starting at "/" reaches either with the same one extra click either way.
+export function browseRouter({ startDirFn = () => '/' } = {}) {
   const router = express.Router();
 
   router.get('/', (req, res) => {
