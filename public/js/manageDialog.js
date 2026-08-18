@@ -130,7 +130,7 @@ export function renderProjectManagement() {
   // settings, "Added folders" and "Add folder" describe something else
   // entirely - the detail view brings its own heading.
   const heading = list.closest('.settings-section')?.querySelector('.settings-section-head');
-  const addForm = document.getElementById('addProjectToggle')?.closest('.add-project');
+  const addForm = document.getElementById('addProjectArea');
   if (heading) heading.hidden = Boolean(open);
   if (addForm) addForm.hidden = Boolean(open);
 
@@ -321,7 +321,7 @@ manageTabsEl.addEventListener('click', (event) => {
   // Refresh when switching there: between opening the window and this
   // click, a session may have been released or ended.
   if (tab.dataset.tab === 'sessions') renderProtectedList();
-  if (tab.dataset.tab === 'projects') renderProjectManagement();
+  if (tab.dataset.tab === 'projects') { renderProjectManagement(); loadFolderBrowser(null); }
   if (tab.dataset.tab === 'access') renderAccessSettings();
 });
 
@@ -361,6 +361,7 @@ export function openManagement(tab) {
   // the last time.
   manageProjectId = null;
   renderProjectManagement();
+  if (tab === 'projects') loadFolderBrowser(null);
   // Fetched on open rather than kept in the loaded model: the targets have
   // no place in the session list, and this is the only view that shows them.
   renderNotificationSettings();
@@ -384,26 +385,22 @@ manageDialogEl.addEventListener('click', (e) => {
   if (e.target === manageDialogEl) manageDialogEl.close();
 });
 
-document.getElementById('addProjectToggle').addEventListener('click', (e) => {
-  const form = document.getElementById('addProjectForm');
-  const willShow = form.style.display === 'none';
-  form.style.display = willShow ? 'flex' : 'none';
-  e.currentTarget.setAttribute('aria-expanded', String(willShow));
-});
-
-// Folder browser for "+ Add folder": GET /api/browse is deliberately
-// restricted to the server's configured browse root (see
-// src/routes/browse.js, config.browseRoot).
-const browseToggleEl = document.getElementById('browseToggle');
-const folderBrowserEl = document.getElementById('folderBrowser');
+// Folder browser for "+ Add folder": always visible in the Projects tab,
+// no toggle to open it first. Clicking a folder navigates into it; the "+"
+// next to a row, or "Add this folder" for the folder currently open, both
+// lead into the same inline name confirmation before POST /api/projects.
 const folderBrowserPathEl = document.getElementById('folderBrowserPath');
+const folderBrowserAddCurrentEl = document.getElementById('folderBrowserAddCurrent');
 const folderBrowserListEl = document.getElementById('folderBrowserList');
+const addProjectConfirmEl = document.getElementById('addProjectConfirm');
+const addProjectConfirmNameEl = document.getElementById('addProjectConfirmName');
 let browserCurrentPath = null;
+let pendingProjectPath = null;
 
 async function loadFolderBrowser(targetPath) {
   try {
     // No path at all (not even an empty one) when targetPath is falsy -
-    // the server then defaults to its own configured root. An empty
+    // the server then defaults to its own start directory. An empty
     // `?path=` would instead resolve to the server's own cwd.
     const url = targetPath ? `/api/browse?path=${encodeURIComponent(targetPath)}` : '/api/browse';
     const res = await fetch(url);
@@ -417,6 +414,7 @@ async function loadFolderBrowser(targetPath) {
     if (parent !== null) {
       const upBtn = document.createElement('button');
       upBtn.type = 'button';
+      upBtn.className = 'folder-browser-open';
       upBtn.replaceChildren(svgNode('back', 'icon-symbol'),
         document.createTextNode('.. (parent folder)'));
       upBtn.addEventListener('click', () => loadFolderBrowser(parent));
@@ -429,51 +427,65 @@ async function loadFolderBrowser(targetPath) {
       folderBrowserListEl.appendChild(empty);
     }
     for (const dir of dirs) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
+      const dirPath = `${resolvedPath}/${dir}`;
+      const row = document.createElement('div');
+      row.className = 'folder-browser-row';
+
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'folder-browser-open';
       // Text node, not innerHTML: dir comes from the real filesystem.
-      btn.replaceChildren(svgNode('folder', 'icon-symbol'), document.createTextNode(dir));
-      btn.addEventListener('click', () => loadFolderBrowser(`${resolvedPath}/${dir}`));
-      folderBrowserListEl.appendChild(btn);
+      open.replaceChildren(svgNode('folder', 'icon-symbol'), document.createTextNode(dir));
+      open.addEventListener('click', () => loadFolderBrowser(dirPath));
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'btn-quiet manage-action';
+      add.title = `Add "${dir}"`;
+      add.setAttribute('aria-label', add.title);
+      add.appendChild(svgNode('plus', 'icon-symbol'));
+      add.addEventListener('click', () => openAddConfirm(dirPath));
+
+      row.append(open, add);
+      folderBrowserListEl.appendChild(row);
     }
   } catch (err) {
     showError(`Could not load folder: ${err.message}`);
   }
 }
 
-browseToggleEl.addEventListener('click', () => {
-  const willShow = folderBrowserEl.style.display === 'none';
-  folderBrowserEl.style.display = willShow ? 'block' : 'none';
-  if (willShow) {
-    const typed = document.getElementById('newProjPath').value.trim();
-    loadFolderBrowser(typed);
-  }
+function openAddConfirm(projectPath) {
+  pendingProjectPath = projectPath;
+  addProjectConfirmNameEl.value = projectPath.split('/').filter(Boolean).pop() ?? projectPath;
+  addProjectConfirmEl.hidden = false;
+  addProjectConfirmNameEl.focus();
+  addProjectConfirmNameEl.select();
+}
+
+function closeAddConfirm() {
+  pendingProjectPath = null;
+  addProjectConfirmEl.hidden = true;
+}
+
+folderBrowserAddCurrentEl.addEventListener('click', () => {
+  if (browserCurrentPath) openAddConfirm(browserCurrentPath);
 });
 
-document.getElementById('folderBrowserChoose').addEventListener('click', () => {
-  if (browserCurrentPath) {
-    document.getElementById('newProjPath').value = browserCurrentPath;
-  }
-  folderBrowserEl.style.display = 'none';
-});
+document.getElementById('addProjectConfirmCancel').addEventListener('click', closeAddConfirm);
 
-document.getElementById('newProjSubmit').addEventListener('click', async () => {
-  const nameInput = document.getElementById('newProjName');
-  const pathInput = document.getElementById('newProjPath');
-  const name = nameInput.value.trim();
-  const projectPath = pathInput.value.trim();
-  if (!name || !projectPath) return;
+document.getElementById('addProjectConfirmSubmit').addEventListener('click', async () => {
+  const name = addProjectConfirmNameEl.value.trim();
+  if (!name || !pendingProjectPath) return;
 
   try {
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, projectPath }),
+      body: JSON.stringify({ name, projectPath: pendingProjectPath }),
     });
     await checkResponse(res);
     clearError();
-    nameInput.value = '';
-    pathInput.value = '';
+    closeAddConfirm();
     await loadProjects();
     // The window stays open while adding - without this, the list above
     // would stay empty until the tab is switched once.

@@ -553,8 +553,7 @@ button { cursor: pointer; }
    would only surface once computed, at which point the fallback in the
    same rule is long gone and the surface ends up transparent. */
 .btn-surface,
-.keybar button,
-.path-row button {
+.keybar button {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface); /* fallback for browsers without color-mix */
@@ -568,8 +567,7 @@ button { cursor: pointer; }
    drift: everything inside a panel lifts its fill, everything sitting free
    on the page picks up an accent edge. Hence no default on .btn-surface -
    a new control has to name which of the two it is. */
-.btn-lift:hover,
-.path-row button:hover {
+.btn-lift:hover {
   background: color-mix(in srgb, var(--surface-2) 84%, var(--text));
   color: var(--text);
 }
@@ -1357,8 +1355,11 @@ button { cursor: pointer; }
   padding: 10px 12px 14px;
   border-top: 1px solid var(--border);
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.add-project-toggle,
+.folder-browser-add-current,
 .accounts-toggle {
   display: flex;
   align-items: center;
@@ -1366,12 +1367,6 @@ button { cursor: pointer; }
   width: 100%;
   padding: 8px 11px;
   font-size: 12.5px;
-}
-.add-project-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
 }
 .add-project input,
 .accounts-panel input,
@@ -1457,21 +1452,15 @@ button { cursor: pointer; }
 .account-name-row { display: flex; gap: 6px; }
 .account-name-row #newAccountName { flex: 1 1 auto; }
 .account-name-row #newAccountAbbr { flex: 0 0 64px; width: 64px; text-align: center; }
-.path-row { display: flex; gap: 6px; }
-.path-row input { flex: 1 1 auto; }
-.path-row button {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 10px;
-}
 
 .folder-browser {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-2);
   padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .folder-browser-path {
   font-family: var(--font-mono);
@@ -1486,7 +1475,13 @@ button { cursor: pointer; }
   display: flex;
   flex-direction: column;
 }
-.folder-browser-list button {
+.folder-browser-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.folder-browser-open {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1498,8 +1493,14 @@ button { cursor: pointer; }
   font-size: 12.5px;
   color: var(--text);
 }
-.folder-browser-list button:hover { background: var(--surface-hover); }
+.folder-browser-open:hover { background: var(--surface-hover); }
 .folder-browser-empty { font-size: 11.5px; color: var(--text-muted); font-style: italic; padding: 4px 6px; }
+
+.add-project-confirm {
+  display: flex;
+  gap: 6px;
+}
+.add-project-confirm input { flex: 1 1 auto; }
 
 .btn-ghost {
   width: 100%;
