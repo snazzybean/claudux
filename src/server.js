@@ -26,8 +26,10 @@ import { createAccessGate, hasValidSession } from './lib/accessGate.js';
 import { accessPublicRouter, accessProtectedRouter } from './routes/access.js';
 import { startReaperInterval } from './lib/reaper.js';
 import { startStatusWatcherInterval } from './lib/statusWatcher.js';
+import { claudeUpdateRouter } from './routes/claudeUpdate.js';
+import { startClaudeCodeUpdateInterval } from './lib/claudeCodeUpdateRun.js';
 
-export function createApp(config) {
+export function createApp(config, { claudeCodeUpdateJob } = {}) {
   const app = express();
   // The files tab saves text files up to 1 MB and brings its own parser
   // for that (see routes/files.js). If the global one ran ahead of it
@@ -118,6 +120,7 @@ export function createApp(config) {
   app.use('/api/browse', browseRouter(config));
   app.use('/api/files', filesRouter(config));
   app.use('/api/update', updateRouter(config));
+  app.use('/api/claude-update', claudeUpdateRouter(config, claudeCodeUpdateJob ? { job: claudeCodeUpdateJob } : {}));
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
@@ -167,7 +170,8 @@ export function startServer(config = loadConfig()) {
 
   const ttydChild = ttydManager.start({ ttydBin: config.ttydBin, port: config.ttydPort });
   const stopReaper = startReaperInterval(config);
-  const app = createApp(config);
+  const claudeCodeUpdate = startClaudeCodeUpdateInterval(config);
+  const app = createApp(config, { claudeCodeUpdateJob: claudeCodeUpdate.job });
   const stopStatusWatcher = startStatusWatcherInterval(config, {
     onEvents: (list) => list.forEach(app.locals.publishStatus),
   });
@@ -189,6 +193,7 @@ export function startServer(config = loadConfig()) {
   async function shutdown() {
     stopReaper();
     stopStatusWatcher();
+    claudeCodeUpdate.stop();
     await new Promise((resolve) => {
       if (!ttydChild || ttydChild.exitCode !== null || ttydChild.signalCode !== null) {
         resolve();
