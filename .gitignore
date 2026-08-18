@@ -27,3 +27,8 @@ OPEN-DECISIONS.md
 # checkout and no other - while its mere presence as a `prepare` script made
 # every `npx github:` install pull the devDependencies.
 .git-hooks/
+
+# Personal, unversioned design-audit tool - see
+# docs/superpowers/specs/2026-08-18-claudux-styleguide-katalog-design.md
+# in the homelab repo for why this never gets committed.
+public/styleguide.html
