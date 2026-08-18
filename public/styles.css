@@ -2944,6 +2944,55 @@ button { cursor: pointer; }
   padding-top: calc(var(--overlay-height) + 8px);
 }
 
+/* The three-step onboarding wizard: account, project, first session. Sits
+   over #terminalFrame instead of replacing it in the flex flow (see the
+   comment in index.html) - position:absolute + inset:0 like
+   .copy-text-panel, but a low z-index: unlike that view, this one must
+   never bury the floating tab switcher/back button above it. */
+.onboarding-wizard {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: auto;
+  padding: calc(var(--overlay-height) + 8px) 16px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.onboarding-wizard[hidden] { display: none; }
+.onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 360px;
+}
+/* Same locking pattern as .login-step (public/styles.css:1526-1594): what
+   isn't due yet recedes into the background, a completed step only dims
+   its heading and hint so its control stays reachable to repeat. */
+.onboarding-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.onboarding-step:first-child { padding-top: 4px; border-top: 0; }
+.onboarding-step[data-active-entry="false"] { opacity: 0.3; }
+.onboarding-step[data-active-entry="true"][data-done="true"] .onboarding-step-header,
+.onboarding-step[data-active-entry="true"][data-done="true"] .settings-hint {
+  opacity: 0.5;
+}
+.onboarding-step-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
 /* The two columns of the files tab. They permanently exist side by side;
    which one is visible is decided by the screen width. */
 .file-tree,

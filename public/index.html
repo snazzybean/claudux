@@ -183,6 +183,30 @@
             <div class="usage-popover" id="usagePopover" role="dialog" aria-label="Usage" hidden></div>
           </div>
           <iframe class="terminal-frame" id="terminalFrame" title="Terminal"></iframe>
+          <!-- Shown whenever account, project, or a first-ever session is
+               still missing - see docs/superpowers/specs/2026-08-18-claudux-einstiegsassistent-design.md.
+               Sits over #terminalFrame instead of replacing it in the flex
+               flow: the iframe has nothing to show anyway in this state,
+               and an absolute overlay needs no changes to the existing
+               terminal/files tab-switch code. -->
+          <div class="onboarding-wizard" id="onboardingWizard" hidden>
+            <div class="onboarding-steps">
+              <div class="onboarding-step" data-step="account" data-active-entry="true" data-done="false">
+                <div class="onboarding-step-header">1 · Add an account</div>
+                <p class="settings-hint">Connects a Claude account so a session can actually run.</p>
+                <button type="button" class="btn-accent" id="onboardingAddAccount">Add account</button>
+              </div>
+              <div class="onboarding-step" data-step="project" data-active-entry="false" data-done="false">
+                <div class="onboarding-step-header">2 · Add a project</div>
+                <p class="settings-hint">Pick a folder on this machine to work in.</p>
+                <button type="button" class="btn-accent" id="onboardingAddProject">Add project</button>
+              </div>
+              <div class="onboarding-step" data-step="chat" data-active-entry="false" data-done="false">
+                <div class="onboarding-step-header">3 · Start chatting</div>
+                <p class="settings-hint">Pick your project on the left and start a session with its "+".</p>
+              </div>
+            </div>
+          </div>
           <!-- The file view is built in here by public/js/files.js. No
                longer an iframe: the view comes from our own server and
                should behave like the rest of the UI. -->
