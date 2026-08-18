@@ -24,3 +24,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # The image stays on a Node LTS line, and Dependabot offers whatever tag
+    # is newest - which is the Current line for half of every year. That step
+    # is taken by hand, once the line it points at has become LTS.
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major

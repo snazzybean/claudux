@@ -1,4 +1,4 @@
-FROM node:22-slim
+FROM node:24-slim
 
 # ttyd is not packaged for Debian - the upstream release binary is static
 # and published per architecture, which is cheaper than building
@@ -7,7 +7,7 @@ ARG TTYD_VERSION=1.7.7
 ARG TARGETARCH
 
 # git, because the repositories a session works on are the point of this
-# image and Claude Code's core workflows need it - node:22-slim carries none.
+# image and Claude Code's core workflows need it - node:24-slim carries none.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tmux ca-certificates curl git procps \
     && rm -rf /var/lib/apt/lists/* \
