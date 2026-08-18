@@ -34,7 +34,7 @@
     "compression": "^1.8.1",
     "esbuild": "^0.28.2",
     "express": "^5.2.1",
-    "highlight.js": "^11.11.1",
+    "highlight.js": "^11.11.2",
     "http-proxy-middleware": "^4.2.0",
     "marked": "^18.0.9",
     "marked-highlight": "^2.2.4",
