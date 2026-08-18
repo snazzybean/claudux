@@ -33,10 +33,11 @@ export function projectsRouter(config) {
     }
     // Rejected here rather than at session start, where the same check
     // would surface as a 500 on the first attempt to use the project.
-    if (!isSafeProjectPath(projectPath)) {
+    const normalizedPath = path.normalize(projectPath);
+    if (!isSafeProjectPath(normalizedPath)) {
       return res.status(400).json({ error: 'projectPath must be absolute and must not contain "#"' });
     }
-    const project = addProject(configPath, { name, projectPath });
+    const project = addProject(configPath, { name, projectPath: normalizedPath });
     res.status(201).json(project);
   });
 

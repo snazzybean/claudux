@@ -1360,7 +1360,8 @@ button { cursor: pointer; }
   gap: 8px;
 }
 .folder-browser-add-current,
-.accounts-toggle {
+.accounts-toggle,
+.notify-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2464,6 +2465,12 @@ button { cursor: pointer; }
 .notify-target-action.sent { color: var(--accent); border-color: var(--accent); }
 .notify-target-action.failed { background: var(--danger-soft); color: var(--danger); }
 .notify-add { padding: 8px 8px 2px; }
+.notify-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
 /* One choice out of a few, side by side. Named for the shape rather than
    for the notification targets it was built for - the project settings pick
    their level with the same control. */
@@ -2488,9 +2495,8 @@ button { cursor: pointer; }
 .notify-edit { margin: 2px 8px 8px; padding-left: 8px; border-left: 2px solid var(--border); }
 .notify-edit input { font-size: 12px; }
 .notify-target-action.open { background: var(--surface-hover); color: var(--text); }
-/* The fields carry no labels of their own - same as the folder form. Muted
-   instead of the browser default, which sat near invisible on the dark
-   surface. */
+/* The fields carry no labels of their own. Muted instead of the browser
+   default, which sat near invisible on the dark surface. */
 .notify-add input::placeholder { color: var(--text-muted); }
 .notify-error { margin: 0 2px; color: var(--danger); font-size: 11px; }
 

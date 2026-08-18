@@ -34,8 +34,8 @@ RUN apt-get update \
 # the app creates .claudux under it on first write.
 RUN userdel -r node \
     && useradd --create-home --uid 1000 --shell /bin/bash claudux \
-    # PROJECTS_BROWSE_ROOT below is resolved through realpath, so without
-    # the directory a run without that mount answers 400 on "+ Add folder".
+    # So the documented volume mount target exists with the right
+    # ownership even before anything is actually mounted there.
     && mkdir -p /projects \
     && chown claudux:claudux /projects
 WORKDIR /app
@@ -51,8 +51,5 @@ USER claudux
 # through os.homedir() - which reads $HOME first. Left to the runtime it is
 # either unset or still /root, and the second case is unwritable.
 ENV HOME=/home/claudux
-# $HOME would point at the container's own home, not at the mounted
-# projects, leaving the "+ Add folder" dialog useless.
-ENV PROJECTS_BROWSE_ROOT=/projects
 EXPOSE 4001
 CMD ["node", "src/server.js"]

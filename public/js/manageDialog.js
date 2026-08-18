@@ -427,7 +427,7 @@ async function loadFolderBrowser(targetPath) {
       folderBrowserListEl.appendChild(empty);
     }
     for (const dir of dirs) {
-      const dirPath = `${resolvedPath}/${dir}`;
+      const dirPath = resolvedPath === '/' ? `/${dir}` : `${resolvedPath}/${dir}`;
       const row = document.createElement('div');
       row.className = 'folder-browser-row';
 

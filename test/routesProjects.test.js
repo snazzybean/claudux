@@ -129,6 +129,34 @@ test('POST /api/projects rejects a relative path and one containing #', async ()
   }
 });
 
+// The folder browser starts at "/" now, so a click on a top-level entry
+// builds `${resolvedPath}/${dir}` from resolvedPath === '/', producing a
+// path with a doubled leading slash. Node's path.normalize collapses that,
+// but a raw string still diverges from it later in sessionStore's cwd
+// encoding, so the route normalizes before the safety check and the store.
+test('POST /api/projects normalizes a doubled leading slash before storing it', async () => {
+  const config = tmpConfig();
+  const app = createApp(config);
+  const server = app.listen(0);
+  const { port } = server.address();
+  const expected = path.join(config.dataDir, 'test-normalize');
+  const doubled = `/${config.dataDir}/test-normalize`;
+
+  const createRes = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Doubled', projectPath: doubled }),
+  });
+  const created = await createRes.json();
+  assert.equal(createRes.status, 201);
+  assert.equal(created.path, expected);
+
+  const listRes = await fetch(`http://127.0.0.1:${port}/api/projects`);
+  const listed = await listRes.json();
+  assert.equal(listed.projects[0].path, expected);
+  server.close();
+});
+
 test('POST /api/projects/:id/favorite with an unknown id returns 404 instead of 500', async () => {
   const app = createApp(tmpConfig());
   const server = app.listen(0);

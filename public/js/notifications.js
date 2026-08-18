@@ -180,7 +180,7 @@ function row(target, onChange) {
 
 function editForm(target, onChange) {
   const form = document.createElement('div');
-  form.className = 'add-project-form notify-edit';
+  form.className = 'notify-form notify-edit';
   // Nothing stored is prefilled: the server never sends a url or a header
   // value back, so an empty field here means "keep it", not "clear it".
   const { nameInput, fields, inputs } = fieldColumn(target.type, {
@@ -226,12 +226,12 @@ function addForm(onCreated) {
   const area = document.createElement('div');
   const toggle = document.createElement('button');
   toggle.type = 'button';
-  toggle.className = 'btn-surface btn-lift add-project-toggle';
+  toggle.className = 'btn-surface btn-lift notify-toggle';
   toggle.setAttribute('aria-expanded', 'false');
   toggle.append(svgNode('plus', 'icon-symbol'), document.createTextNode('Add target'));
 
   const form = document.createElement('div');
-  form.className = 'add-project-form';
+  form.className = 'notify-form';
   form.style.display = 'none';
 
   const chooser = document.createElement('div');
