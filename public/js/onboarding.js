@@ -5,7 +5,7 @@
 // why a persisted "seen" flag isn't needed: a project's sessions stay listed
 // (as a gray-dot corpse) until the project itself is removed, the reaper
 // never deletes the JSONL that keeps them there.
-import { onboardingWizardEl, tabTerminalEl } from './dom.js';
+import { onboardingWizardEl, tabTerminalEl, terminalFrameEl } from './dom.js';
 
 let openManagement = () => {};
 
@@ -52,7 +52,15 @@ export function updateOnboardingWizard(accounts, projects) {
   setStep('chat', hasProject || hasSession, hasSession);
 
   const allDone = hasAccount && hasProject && hasSession;
-  onboardingWizardEl.hidden = allDone || tabTerminalEl.dataset.active !== 'true';
+  // A loaded terminal always wins over allDone, even when it's false: the
+  // login terminal (openLoginTerminal()) has no account/project prerequisite
+  // of its own and is reached from this wizard's own "Add account" button
+  // before any account exists, so allDone stays false while it's showing.
+  // #terminalFrame's src attribute is the reliable "something is loaded"
+  // signal - present the moment openSession()/openLoginTerminal() set it,
+  // gone the moment closeOpenTerminal() clears it.
+  onboardingWizardEl.hidden =
+    allDone || tabTerminalEl.dataset.active !== 'true' || terminalFrameEl.hasAttribute('src');
 }
 
 document.getElementById('onboardingAddAccount').addEventListener('click', () => openManagement('accounts'));
