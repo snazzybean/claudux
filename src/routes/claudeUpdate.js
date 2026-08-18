@@ -2,7 +2,7 @@
 // GET (cheap - just a local process, no network) rather than cached, so
 // the System tab always shows the truth even between 6h ticks.
 import express from 'express';
-import { readClaudeCodeVersion } from '../lib/claudeCodeVersion.js';
+import { readClaudeCodeVersion, readInstallMethod } from '../lib/claudeCodeVersion.js';
 import { readAutoUpdateEnabled, writeAutoUpdateEnabled } from '../lib/claudeCodeUpdateSettings.js';
 import { createClaudeCodeUpdateJob } from '../lib/claudeCodeUpdateRun.js';
 
@@ -11,6 +11,7 @@ const RESULT_BY_UPDATED = { true: 'updated', false: 'up-to-date' };
 export function claudeUpdateRouter(config, {
   job = createClaudeCodeUpdateJob(),
   versionFn = readClaudeCodeVersion,
+  installMethodFn = readInstallMethod,
 } = {}) {
   const router = express.Router();
 
@@ -25,6 +26,7 @@ export function claudeUpdateRouter(config, {
     try {
       res.json({
         current: await versionFn(),
+        installMethod: installMethodFn(),
         autoUpdateEnabled: readAutoUpdateEnabled(config.claudeUpdateSettingsPath),
         lastRunAt: job.status().ranAt,
         lastResult: lastResult(),

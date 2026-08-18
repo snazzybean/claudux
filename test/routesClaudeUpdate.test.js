@@ -25,10 +25,12 @@ function jobStub({ busy = false, status } = {}) {
   };
 }
 
-function serve({ job = jobStub(), versionFn = async () => '2.1.234', settingsPath = tmpSettingsPath() } = {}) {
+function serve({
+  job = jobStub(), versionFn = async () => '2.1.234', installMethodFn = () => null, settingsPath = tmpSettingsPath(),
+} = {}) {
   const app = express();
   app.use(express.json());
-  app.use('/api/claude-update', claudeUpdateRouter({ claudeUpdateSettingsPath: settingsPath }, { job, versionFn }));
+  app.use('/api/claude-update', claudeUpdateRouter({ claudeUpdateSettingsPath: settingsPath }, { job, versionFn, installMethodFn }));
   const server = app.listen(0);
   const { port } = server.address();
   return { base: `http://127.0.0.1:${port}/api/claude-update`, close: () => server.close() };
@@ -44,6 +46,14 @@ test('GET reports the live version, toggle state, and last result', async () => 
   assert.equal(body.autoUpdateEnabled, true);
   assert.equal(body.lastRunAt, 1000);
   assert.equal(body.lastResult, 'updated');
+  s.close();
+});
+
+test('GET passes the install method through as-is', async () => {
+  const s = serve({ installMethodFn: () => 'global' });
+  const body = await (await fetch(s.base)).json();
+
+  assert.equal(body.installMethod, 'global');
   s.close();
 });
 

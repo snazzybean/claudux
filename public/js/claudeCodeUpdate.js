@@ -3,11 +3,15 @@
 // like update.js's - a background install here never needs one, so there
 // is nothing to poll beyond the one request while it runs.
 import {
-  claudeCodeVersionEl, claudeCodeCheckedEl, claudeCodeReasonEl, claudeCodeNotesEl,
+  claudeCodeVersionEl, claudeCodeCheckedEl, claudeCodeInstallEl, claudeCodeReasonEl, claudeCodeNotesEl,
   claudeCodeCheckBtnEl, claudeCodeAutoToggleEl,
 } from './dom.js';
+import { showToast } from './messages.js';
 
 const POLL_MS = 1500;
+const SILENT_POLL_MS = 5 * 60 * 1000;
+
+let lastKnownVersion = null;
 
 async function load(path = '', method = 'GET', body) {
   const res = await fetch(`/api/claude-update${path}`, {
@@ -24,12 +28,27 @@ function render(info) {
   claudeCodeCheckedEl.textContent = info.lastRunAt
     ? `Last checked ${new Date(info.lastRunAt).toLocaleString()}`
     : 'Not checked yet';
+  claudeCodeInstallEl.textContent = info.installMethod ? `Installation: ${info.installMethod}` : '';
   const failed = info.lastResult === 'failed';
   claudeCodeReasonEl.hidden = !failed;
   claudeCodeReasonEl.textContent = failed ? (info.error ?? 'The last check failed.') : '';
   claudeCodeNotesEl.hidden = !info.current;
   if (info.current) claudeCodeNotesEl.href = `https://github.com/anthropics/claude-code/releases/tag/v${info.current}`;
   claudeCodeAutoToggleEl.checked = info.autoUpdateEnabled;
+  lastKnownVersion = info.current;
+}
+
+async function pollSilently() {
+  try {
+    const info = await load();
+    if (lastKnownVersion !== null && info.current !== null && info.current !== lastKnownVersion) {
+      showToast(`Claude Code updated to ${info.current}`);
+    }
+    render(info);
+  } catch {
+    // Same tolerant rule as everywhere else in this module - a failed
+    // background poll is not worth surfacing.
+  }
 }
 
 async function pollUntilDone() {
@@ -63,4 +82,5 @@ export function initClaudeCodeUpdate() {
   load().then(render).catch(() => {
     // No answer means no display update - the same rule update.js follows.
   });
+  setInterval(pollSilently, SILENT_POLL_MS);
 }

@@ -48,6 +48,7 @@ export const systemReasonEl = document.getElementById('systemReason');
 export const systemCheckBtnEl = document.getElementById('systemCheckBtn');
 export const claudeCodeVersionEl = document.getElementById('claudeCodeVersion');
 export const claudeCodeCheckedEl = document.getElementById('claudeCodeChecked');
+export const claudeCodeInstallEl = document.getElementById('claudeCodeInstall');
 export const claudeCodeReasonEl = document.getElementById('claudeCodeReason');
 export const claudeCodeNotesEl = document.getElementById('claudeCodeNotes');
 export const claudeCodeCheckBtnEl = document.getElementById('claudeCodeCheckBtn');

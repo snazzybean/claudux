@@ -3,12 +3,16 @@
 // only `claude update` and two version reads, both through injected fakes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClaudeCodeUpdateJob } from '../src/lib/claudeCodeUpdateRun.js';
+import { createClaudeCodeUpdateJob, releaseUrl } from '../src/lib/claudeCodeUpdateRun.js';
 
 function versionQueue(values) {
   let i = 0;
   return async () => values[Math.min(i++, values.length - 1)];
 }
+
+test('releaseUrl builds the correct GitHub release URL', () => {
+  assert.equal(releaseUrl('2.1.234'), 'https://github.com/anthropics/claude-code/releases/tag/v2.1.234');
+});
 
 test('an actual version change is reported as updated and triggers a notification', async () => {
   const notified = [];
@@ -59,6 +63,21 @@ test('claude update failing leaves the job failed with stderr as the reason', as
 
   assert.equal(job.status().phase, 'failed');
   assert.match(job.status().error, /network unreachable/);
+});
+
+// A timeout rejection from runFn goes through the exact same failure path
+// as any other runFn rejection - no special-casing to regress.
+test('a timed-out claude update leaves the job failed with the timeout message', async () => {
+  const job = createClaudeCodeUpdateJob({
+    versionFn: versionQueue(['2.1.226']),
+    runFn: async () => { throw new Error('claude update timed out after 600000 ms'); },
+    notifyFn: async () => { throw new Error('must not be called'); },
+  });
+
+  await job.start();
+
+  assert.equal(job.status().phase, 'failed');
+  assert.match(job.status().error, /timed out after 600000 ms/);
 });
 
 // A reported success (exit 0) that left nothing behind to verify.
