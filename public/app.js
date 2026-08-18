@@ -1720,9 +1720,6 @@ async function restoreLastSession() {
 // that everywhere. A name that survives the page looks like a process
 // that's still running.
 resetWizard();
-// Same for the folder form next to it - same cause, same fix.
-document.getElementById('newProjName').value = '';
-document.getElementById('newProjPath').value = '';
 
 // Deliberate order: loadAccounts() first and awaited, so `knownAccounts`
 // is already populated on the first render – otherwise every project
