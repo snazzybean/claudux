@@ -41,6 +41,7 @@ import { initUsage } from './js/usage.js';
 import { showFiles, leaveFiles } from './js/files.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
+import { initClaudeCodeUpdate } from './js/claudeCodeUpdate.js';
 import { svg, svgNode } from './js/icons.js';
 import { toggleCopyMenu, closeCopyMenu, leaveCopyText } from './js/copyText.js';
 import { startEventStream } from './js/events.js';
@@ -2050,6 +2051,7 @@ initTerminalLinks({
 
 // Needs nothing from here: it reads its own route and owns its two views.
 initUpdate();
+initClaudeCodeUpdate();
 
 // PWA: register a service worker, only so the browser offers the "Add to
 // home screen" install flow – no offline caching.
