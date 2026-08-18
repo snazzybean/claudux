@@ -1501,6 +1501,8 @@ button { cursor: pointer; }
   gap: 6px;
 }
 .add-project-confirm input { flex: 1 1 auto; }
+.add-project[hidden],
+.add-project-confirm[hidden] { display: none; }
 
 .btn-ghost {
   width: 100%;
