@@ -118,7 +118,7 @@ jobs:
 
       # arm64 is not optional: without it the image only runs emulated on
       # an Apple Silicon Mac.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

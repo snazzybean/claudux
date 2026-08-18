@@ -69,7 +69,7 @@ jobs:
       # amd64 alone, and no QEMU: the second architecture is emulated here,
       # costs minutes per run and would only repeat what this one proves.
       # The multi-arch build stays in release.yml.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
