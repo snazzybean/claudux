@@ -42,9 +42,14 @@ export function updateOnboardingWizard(accounts, projects) {
   const hasProject = projects.length > 0;
   const hasSession = projects.some((p) => p.sessions.length > 0);
 
+  // Once a step is done it stays in the "active" look even if its
+  // prerequisite regresses (e.g. the account is deleted after project and
+  // session already exist) - otherwise the lock rule (opacity: 0.3 on the
+  // whole block) would make an already-completed step look never-reached
+  // instead of showing its "done" dim (opacity: 0.5, button still enabled).
   setStep('account', true, hasAccount);
-  setStep('project', hasAccount, hasProject);
-  setStep('chat', hasProject, hasSession);
+  setStep('project', hasAccount || hasProject, hasProject);
+  setStep('chat', hasProject || hasSession, hasSession);
 
   const allDone = hasAccount && hasProject && hasSession;
   onboardingWizardEl.hidden = allDone || tabTerminalEl.dataset.active !== 'true';
