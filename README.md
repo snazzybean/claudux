@@ -145,7 +145,6 @@ installation:
 | `ACCESS_SECRET_PATH` | site password and sessions, **outside** the checkout |
 | `ACCOUNTS_SECRET_PATH` | account tokens, **outside** the checkout |
 | `NOTIFICATION_TARGETS_PATH` | notification targets, **outside** the checkout |
-| `PROJECTS_BROWSE_ROOT` | root of the "+ Add folder" browse dialog, `$HOME` by default |
 | `IDLE_THRESHOLD_MS` | when the reaper ends a dormant session |
 | `UNUSED_IDLE_THRESHOLD_MS` | shorter deadline for sessions without any prompt |
 | `LOGIN_IDLE_THRESHOLD_MS` | shorter still for an abandoned `claude setup-token` session |

@@ -57,11 +57,6 @@ export function loadConfig(env = process.env) {
     // background job may run automatically.
     claudeUpdateSettingsPath:
       env.CLAUDE_UPDATE_SETTINGS_PATH || path.join(os.homedir(), '.claudux', 'claude-update.json'),
-    // Root for the "+ Add folder" browse dialog (src/routes/browse.js).
-    // $HOME rather than a fixed directory: anything else is a local
-    // convention that makes the browse button unusable elsewhere
-    // (`POST /api/projects` itself takes any path, unaffected by this).
-    browseRoot: env.PROJECTS_BROWSE_ROOT || os.homedir(),
     idleThresholdMs: Number(env.IDLE_THRESHOLD_MS || 4 * 60 * 60 * 1000),
     // Shorter threshold for sessions nobody ever typed a word into
     // (recognizable by the missing JSONL, see buildIsUnused in

@@ -58,7 +58,7 @@ test('every home-derived default stays absolute even without HOME', () => {
   delete process.env.HOME;
   try {
     const cfg = loadConfig({});
-    for (const key of ['claudeHome', 'accountsSecretPath', 'notificationTargetsPath', 'browseRoot']) {
+    for (const key of ['claudeHome', 'accountsSecretPath', 'notificationTargetsPath']) {
       assert.ok(path.isAbsolute(cfg[key]), `${key}: expected an absolute path, got ${cfg[key]}`);
       assert.ok(!cfg[key].includes('undefined'), `${key}: interpolated a missing HOME`);
     }

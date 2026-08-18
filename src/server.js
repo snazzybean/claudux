@@ -29,7 +29,7 @@ import { startStatusWatcherInterval } from './lib/statusWatcher.js';
 import { claudeUpdateRouter } from './routes/claudeUpdate.js';
 import { startClaudeCodeUpdateInterval } from './lib/claudeCodeUpdateRun.js';
 
-export function createApp(config, { claudeCodeUpdateJob } = {}) {
+export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}) {
   const app = express();
   // The files tab saves text files up to 1 MB and brings its own parser
   // for that (see routes/files.js). If the global one ran ahead of it
@@ -117,7 +117,7 @@ export function createApp(config, { claudeCodeUpdateJob } = {}) {
   app.use('/api/presence', presenceRouter());
   app.use('/api/accounts', accountsRouter(config));
   app.use('/api/uploads', uploadsRouter());
-  app.use('/api/browse', browseRouter(config));
+  app.use('/api/browse', browseRouter(browseStartDirFn ? { startDirFn: browseStartDirFn } : {}));
   app.use('/api/files', filesRouter(config));
   app.use('/api/update', updateRouter(config));
   app.use('/api/claude-update', claudeUpdateRouter(config, claudeCodeUpdateJob ? { job: claudeCodeUpdateJob } : {}));
