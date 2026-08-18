@@ -52,6 +52,11 @@ export function loadConfig(env = process.env) {
       env.VAPID_SUBJECT
       || (env.PUBLIC_BASE_URL ? new URL(env.PUBLIC_BASE_URL).origin : '')
       || 'https://github.com/snazzybean/claudux',
+    // Same reasoning as vapidKeysPath: outside the checkout, behind file
+    // permissions. Holds one boolean - whether claudeCodeUpdateRun.js's
+    // background job may run automatically.
+    claudeUpdateSettingsPath:
+      env.CLAUDE_UPDATE_SETTINGS_PATH || path.join(os.homedir(), '.claudux', 'claude-update.json'),
     // Root for the "+ Add folder" browse dialog (src/routes/browse.js).
     // $HOME rather than a fixed directory: anything else is a local
     // convention that makes the browse button unusable elsewhere
