@@ -23,6 +23,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     # The image stays on a Node LTS line, and Dependabot offers whatever tag
     # is newest - which is the Current line for half of every year. That step

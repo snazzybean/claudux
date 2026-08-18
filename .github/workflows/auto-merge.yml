@@ -1,0 +1,73 @@
+name: Auto-merge
+
+# CI itself cannot do this: on a Dependabot pull request its GITHUB_TOKEN is
+# read-only. A workflow_run job runs on the default branch afterwards, where
+# the token may write.
+#
+# Deliberately no checkout. This job holds a write token while a pull request
+# it did not vet is in flight, so nothing from that branch is ever fetched or
+# executed here - it only reads the API and merges.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: >
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          number=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq 'map(select(.state == "open")) | .[0].number // empty')
+          if [ -z "$number" ]; then
+            echo "no open pull request for $SHA"
+            exit 0
+          fi
+
+          read -r author head < <(gh api "repos/$REPO/pulls/$number" \
+            --jq '"\(.user.login) \(.head.sha)"')
+
+          # The only account whose pull requests may merge unattended. A fork
+          # cannot borrow this name, so it is the whole trust boundary.
+          if [ "$author" != "dependabot[bot]" ]; then
+            echo "#$number is from $author - not merging"
+            exit 0
+          fi
+
+          # The run proves the commit it tested, not whatever was pushed since.
+          if [ "$head" != "$SHA" ]; then
+            echo "#$number moved on from $SHA - waiting for the run on $head"
+            exit 0
+          fi
+
+          # Dependabot records the semver step in the commit it pushed. A
+          # grouped update carries one line per dependency, so a single major
+          # among them holds the whole pull request back. No trailer at all
+          # means no evidence, which counts against merging.
+          types=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message' \
+            | sed -n 's/^ *update-type: version-update:semver-//p')
+          if [ -z "$types" ]; then
+            echo "#$number carries no update-type trailer - leaving it alone"
+            exit 0
+          fi
+          if printf '%s\n' "$types" | grep -qvE '^(patch|minor)$'; then
+            echo "#$number is not patch or minor:"
+            printf '%s\n' "$types"
+            exit 0
+          fi
+
+          gh pr merge "$number" --repo "$REPO" --squash --delete-branch
