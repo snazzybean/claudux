@@ -54,6 +54,7 @@ import {
   protectionWarning,
   closeManageDialog,
 } from './js/manageDialog.js';
+import { initOnboarding, updateOnboardingWizard } from './js/onboarding.js';
 import {
   initAccounts,
   allAccounts,
@@ -85,6 +86,8 @@ initManageDialog({
   toggleFavorite: (project) => toggleFavorite(project),
   loadProjects: () => loadProjects(),
 });
+
+initOnboarding({ openManagement });
 
 // Every request in this page goes through here rather than through a helper
 // each call site has to remember: a 401 means the session ended, and the
@@ -1319,6 +1322,7 @@ function render(filter) {
   // From the same data as the list, so the two can't drift apart. The
   // filter is deliberately left out: the rail isn't a search result.
   renderRail();
+  updateOnboardingWizard(allAccounts(), projects);
   // What's on screen right now - the background tick compares against this.
   lastSignature = sessionSignature();
   // Layout only settles once these elements are actually in the document -
@@ -1385,6 +1389,7 @@ function activateTerminalTab() {
   // screens through a media query, and an inline style would always
   // override that.
   appEl.dataset.tab = 'terminal';
+  updateOnboardingWizard(allAccounts(), projects);
 }
 
 // The other direction, factored out so a terminal path click (see
@@ -1405,6 +1410,7 @@ function activateFilesTab(project = currentProject) {
   // the file list - it doesn't belong there.
   leaveCopyText();
   showFiles(project);
+  updateOnboardingWizard(allAccounts(), projects);
 }
 
 // Plain-text hint about the open session's auth state. Deliberately a

@@ -3,6 +3,7 @@
 export const appEl = document.getElementById('app');
 export const projectListEl = document.getElementById('projectList');
 export const terminalFrameEl = document.getElementById('terminalFrame');
+export const onboardingWizardEl = document.getElementById('onboardingWizard');
 export const errorBannerEl = document.getElementById('errorBanner');
 export const errorBannerTextEl = document.getElementById('errorBannerText');
 export const errorBannerCloseEl = document.getElementById('errorBannerClose');
