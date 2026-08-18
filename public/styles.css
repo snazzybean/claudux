@@ -2335,7 +2335,33 @@ button { cursor: pointer; }
   text-align: left;
   cursor: pointer;
 }
-.settings-item:hover { background: var(--surface-hover); }
+.settings-item:hover:not(:disabled) { background: var(--surface-hover); }
+/* The two "Check ..." buttons: same cone-of-light idiom as .login-waiting
+   while a background check is running, so the settings dialog gives the
+   same "something is happening" cue it already gives at login instead of
+   inventing a second one. Text and gradient stops match .login-waiting
+   exactly - one shared vocabulary for "please wait" text app-wide. */
+.check-btn:disabled {
+  cursor: default;
+  background-image: linear-gradient(
+    100deg,
+    var(--text-muted) 35%,
+    var(--text) 50%,
+    var(--text-muted) 65%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .check-btn:disabled {
+    animation: none;
+    background-image: none;
+    color: var(--text-muted);
+  }
+}
 .settings-section {
   margin-top: 6px;
   padding-top: 8px;
