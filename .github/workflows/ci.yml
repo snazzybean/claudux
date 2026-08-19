@@ -20,7 +20,19 @@ jobs:
           node-version: '24'
           cache: npm
 
-      - run: sudo apt-get update && sudo apt-get install -y tmux
+      # A regional apt mirror stalling mid-fetch has hung this exact step
+      # past the job's own 15-minute timeout three times in a row
+      # (2026-08-19) - each attempt is capped instead of losing the whole
+      # budget to one stuck fetch.
+      - run: |
+          for i in 1 2 3; do
+            if sudo timeout 60 apt-get update && sudo timeout 60 apt-get install -y tmux; then
+              exit 0
+            fi
+            echo "apt-get attempt $i failed, retrying..." >&2
+            sleep 5
+          done
+          exit 1
 
       # The route tests start real tmux sessions, and scripts/claude-session.sh
       # runs `claude` in them: without the binary the pane dies at once and
