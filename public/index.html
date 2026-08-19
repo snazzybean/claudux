@@ -213,9 +213,14 @@
           <div class="files-panel" id="filesPanel" style="display:none"></div>
           <!-- Text view for selecting. It covers the terminal instead of
                hiding it: a display change on the iframe costs xterm a
-               reflow, and the keyboard bar below must stay reachable -
-               closing runs through it. -->
-          <pre class="copy-text-panel" id="copyTextPanel" aria-label="Terminal text for selecting" hidden></pre>
+               reflow. Its own close button, not just the keybar's copy
+               button, closes it - that indirection cost a reload before. -->
+          <div class="copy-text-panel" id="copyTextPanel" hidden>
+            <div class="copy-text-head">
+              <button type="button" class="btn-quiet copy-text-close" id="copyTextClose" aria-label="Close" title="Close"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="m4.2 4.2 7.6 7.6"/><path d="m11.8 4.2-7.6 7.6"/></svg></button>
+            </div>
+            <pre class="copy-text-content" id="copyTextContent" aria-label="Terminal text for selecting"></pre>
+          </div>
           <!-- The toast sits INSIDE the terminal area, not at the document
                edge: as `position: fixed` at the bottom of the screen it
                used to sit under the on-screen keyboard on the phone and was

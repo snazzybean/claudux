@@ -16,6 +16,8 @@ import {
   copyMenuCloseEl,
   copyMenuStatusEl,
   copyTextPanelEl,
+  copyTextContentEl,
+  copyTextCloseEl,
   copySelectionBtnEl,
   overlayMenuEl,
 } from './dom.js';
@@ -43,7 +45,7 @@ function currentText() {
 }
 
 function render() {
-  copyTextPanelEl.textContent = currentText() || 'The terminal is empty.';
+  copyTextContentEl.textContent = currentText() || 'The terminal is empty.';
   copyMenuVersionEl.textContent = `View: ${showClean ? 'Clean' : 'Raw'}`;
   copyMenuVersionEl.setAttribute('aria-pressed', String(!showClean));
 }
@@ -111,6 +113,7 @@ copyMenuVersionEl.addEventListener('click', () => {
 });
 
 copyMenuCloseEl.addEventListener('click', leaveCopyText);
+copyTextCloseEl.addEventListener('click', leaveCopyText);
 
 // A tap next to the menu closes it - but only the menu, not the view.
 // Anyone selecting text in the view will inevitably tap outside it.

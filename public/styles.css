@@ -3577,25 +3577,43 @@ button { cursor: pointer; }
    text selection works. */
 .copy-text-panel {
   /* Covers the terminal instead of hiding it - a display change on the
-     iframe costs xterm a reflow. The key bar stays free, closing happens
-     through it. */
+     iframe costs xterm a reflow. Its own close button (.copy-text-close)
+     means neither the keybar nor the ···-menu has to stay reachable for
+     closing anymore - that indirection used to cost a page reload. */
   position: absolute;
   inset: 0;
   z-index: 20;
-  /* From 721px up, the key bar is hidden (see .keybar), and the only path
-     to this view there is via the ···-menu in the floating bar -
-     "inset: 0" sits directly over that and buried the menu along with the
-     tab switcher with no way out except a reload. From this width on, the
-     view therefore starts below the bar instead of at 0 (see media query
-     below); below 721px inset:0 remains, since the key bar outside
-     .terminal-wrap is reachable there anyway. */
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
   margin: 0;
-  padding: 10px;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+}
+@media (min-width: 721px) {
+  /* 8px is the bar's existing spacing from the edge (.panel-overlay { top:
+     8px }) - the same calculation as for .files-panel further up, so both
+     views start below the same edge. */
+  .copy-text-panel { top: calc(var(--overlay-height) + 8px); }
+}
+.copy-text-head {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 4px 0;
+}
+/* .btn-quiet, plus its own padding (a generous thumb target) and hover
+   color (the "muted to full" idiom - this is a plain close, not a
+   destructive one). */
+.copy-text-close { padding: 8px; }
+.copy-text-close:hover { color: var(--text); }
+.copy-text-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 6px 10px 10px;
   font-family: var(--font-mono);
   /* Noticeably larger than in the terminal (11px on mobile): there the
      column count matters, here readability does - the text wraps anyway. */
@@ -3609,12 +3627,6 @@ button { cursor: pointer; }
   /* The actual point of this view. -webkit- for older iOS versions. */
   -webkit-user-select: text;
   user-select: text;
-}
-@media (min-width: 721px) {
-  /* 8px is the bar's existing spacing from the edge (.panel-overlay { top:
-     8px }) - the same calculation as for .files-panel further up, so both
-     views start below the same edge. */
-  .copy-text-panel { top: calc(var(--overlay-height) + 8px); }
 }
 
 /* Only carries the anchor point for the menu - see index.html. */
