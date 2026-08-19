@@ -167,9 +167,9 @@
                      the text must be loaded before it can be copied, and
                      the way to close the text view leads back through this
                      very menu. -->
-                <div class="overlay-menu" id="overlayMenu" role="menu" hidden>
-                  <button type="button" role="menuitem" id="overlayMenuRelease">Release terminal</button>
-                  <button type="button" role="menuitem" id="overlayMenuText">Terminal text…</button>
+                <div class="menu-panel overlay-menu" id="overlayMenu" role="menu" hidden>
+                  <button type="button" class="menu-item" role="menuitem" id="overlayMenuRelease">Release terminal</button>
+                  <button type="button" class="menu-item" role="menuitem" id="overlayMenuText">Terminal text…</button>
                 </div>
               </div>
             </div>
@@ -237,11 +237,11 @@
         <!-- Flyout menu on the copy button. At the bottom instead of the
              top, because that's where the thumb is; "Copy all" works this
              way without even opening the text view. -->
-        <div class="copy-menu" id="copyMenu" role="menu" hidden>
-          <button type="button" role="menuitem" id="copyMenuView">Text for selecting</button>
-          <button type="button" role="menuitem" id="copyMenuAll">Copy all</button>
-          <button type="button" role="menuitem" id="copyMenuVersion" aria-pressed="false">View: Clean</button>
-          <button type="button" role="menuitem" id="copyMenuClose">Close</button>
+        <div class="menu-panel copy-menu" id="copyMenu" role="menu" hidden>
+          <button type="button" class="menu-item" role="menuitem" id="copyMenuView">Text for selecting</button>
+          <button type="button" class="menu-item" role="menuitem" id="copyMenuAll">Copy all</button>
+          <button type="button" class="menu-item" role="menuitem" id="copyMenuVersion" aria-pressed="false">View: Clean</button>
+          <button type="button" class="menu-item" role="menuitem" id="copyMenuClose">Close</button>
           <span class="copy-menu-status" id="copyMenuStatus" role="status" aria-live="polite"></span>
         </div>
         <div class="keybar" id="keybar" data-expanded="false">
@@ -335,7 +335,7 @@
                the colors live in styles.css anyway, and a second list in JS
                would be one more source that can drift out of sync with it.
                All JS sets is data-active. -->
-          <div class="palette-list" id="paletteList">
+          <div class="stack-list palette-list" id="paletteList">
             <button class="palette-item" type="button" data-palette="bluegray"><span class="palette-dot"></span>Blue-gray</button>
             <button class="palette-item" type="button" data-palette="warmgray"><span class="palette-dot"></span>Warm gray</button>
             <button class="palette-item" type="button" data-palette="neutral"><span class="palette-dot"></span>Neutral</button>
@@ -353,7 +353,7 @@
                same value: previously ttyd's gray showed in the terminal and
                a different tone in the border around it - visible whenever
                no terminal was loaded. -->
-          <div class="palette-list" id="termBellList">
+          <div class="stack-list palette-list" id="termBellList">
             <button class="palette-item" type="button" data-bell="console">Console default</button>
             <button class="palette-item" type="button" data-bell="dark">Neutral dark</button>
             <button class="palette-item" type="button" data-bell="palette">Match the UI</button>
@@ -403,7 +403,7 @@
           <!-- Fixed in the markup like the palette list: the values are the
                ones the server accepts, and a second list in JS would be one
                more place they can drift apart. JS only sets data-active. -->
-          <div class="ttl-list" id="ttlList">
+          <div class="stack-list ttl-list" id="ttlList">
             <button class="ttl-item" type="button" data-days="7">7 days</button>
             <button class="ttl-item" type="button" data-days="30">30 days</button>
             <button class="ttl-item" type="button" data-days="180">6 months</button>
@@ -439,7 +439,7 @@
              accounts. Filled from the loaded model (see app.js). -->
         <div class="settings-section">
           <div class="settings-section-head">Added folders</div>
-          <div class="manage-list" id="projectManageList"></div>
+          <div class="stack-list manage-list" id="projectManageList"></div>
         </div>
       <div class="add-project" id="addProjectArea">
         <div class="folder-browser" id="folderBrowser">
@@ -460,7 +460,7 @@
 
       <section class="manage-pane" data-pane="accounts" hidden>
       <div class="accounts-panel">
-        <div class="accounts-list" id="accountsList"></div>
+        <div class="stack-list accounts-list" id="accountsList"></div>
         <!-- Wizard confirmation. It sits here instead of in step 4: the
              wizard closes once the work is done, and its message would
              have disappeared with it - or, as long as it stayed open,

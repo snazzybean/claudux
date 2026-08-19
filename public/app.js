@@ -822,7 +822,7 @@ function isOpenSession(project, session) {
 function buildSessionRow(project, session, fallbackAccountSelect) {
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'session-row';
+  row.className = 'row-card session-row';
   // Anchor point for the time label: the 15-second tick rewrites "3 min
   // ago" in place, without rebuilding the list (see updateTimes).
   row.dataset.sessionId = session.id;

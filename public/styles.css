@@ -1012,6 +1012,28 @@ button { cursor: pointer; }
   font-style: italic;
 }
 
+/* Reads as its own box on the surface behind it - see --glass-card. The
+   row is a <button>; border:0 clears the UA-stylesheet's own outset
+   ring, which would otherwise show through. .session-row and .file-row
+   compose this with their own display type, spacing and fill. */
+.row-card {
+  border: 0;
+  border-radius: var(--r-md);
+  box-shadow: var(--glass-card);
+  text-align: left;
+  transition: background var(--dur);
+}
+/* --accent-soft is semi-transparent and would sit BEHIND the card fill,
+   not on top of it - as a state indicator that was no longer recognizable
+   against the box. The accent is therefore blended into the fill instead -
+   no border left to carry an accent edge, so the fill alone marks the
+   active row. .session-row and .file-row each flag their own active entry
+   through a differently named attribute; the fill itself is the same. */
+.row-card[data-active="true"],
+.row-card[data-active-entry="true"] {
+  background: var(--accent-soft); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
+}
 .session-row {
   width: 100%;
   display: grid;
@@ -1044,36 +1066,16 @@ button { cursor: pointer; }
      background instead in whichever direction the palette currently needs
      - lighter in the dark direction, darker in the light direction. A
      single percentage is then enough for all eight palettes and both
-     directions.
-
-     For the shadow see --glass-card above. */
+     directions. */
   margin: 0 0 6px;
-  /* Explicit 0, not just an absent declaration: the row is a <button>, and
-     without this the browser's own UA-stylesheet border (a grey outset
-     ring) shows through where the drawn border used to sit on top of it. */
-  border: 0;
-  border-radius: var(--r-md);
   background: var(--surface-hover); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
-  box-shadow: var(--glass-card);
-  text-align: left;
-  transition: background var(--dur);
 }
 .session-row:hover:not(:disabled) {
   background: var(--surface-hover); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 84%, var(--text));
 }
 .session-row:disabled { opacity: 0.6; cursor: default; }
-/* --accent-soft is semi-transparent and would sit BEHIND the card fill,
-   not on top of it - as a state indicator that was no longer recognizable
-   against the box. The accent is therefore blended into the fill instead -
-   no border left to carry an accent edge, so the fill alone marks the
-   active row. */
-.session-row[data-active="true"] {
-  background: var(--accent-soft); /* fallback for browsers without color-mix */
-  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
-  box-shadow: var(--glass-card);
-}
 /* On running sessions, the status dot doubles as the end button: it shows
    a power icon in the live colour, so the action is visible without a
    hover and sits exactly where the state it concerns is shown. Idle
@@ -1401,7 +1403,11 @@ button { cursor: pointer; }
 .btn-accent:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 
 .accounts-panel { margin-top: 10px; border-top: 1px solid var(--border); padding: 10px 12px 14px; }
-.accounts-list { margin-bottom: 8px; display: flex; flex-direction: column; gap: var(--space-xs); }
+/* A vertical stack of same-height entries with a small, consistent gap -
+   .accounts-list, .manage-list, .palette-list and .ttl-list all compose
+   this, .accounts-list with its own extra margin below. */
+.stack-list { display: flex; flex-direction: column; gap: var(--space-xs); }
+.accounts-list { margin-bottom: 8px; }
 /* Everything else this button needs comes from .btn-quiet and .manage-action,
    which it is always handed together with - only the smaller icon is its
    own. */
@@ -1796,18 +1802,15 @@ button { cursor: pointer; }
   font-size: var(--fs-body);
   line-height: 1;
 }
-/* Below the button, aligned to the right edge - like the usage popover on
-   the pill next to it. Own background, because the terminal underneath
-   would otherwise show through. */
-.overlay-menu {
+/* A floating dropdown panel. Own background, because whatever sits
+   underneath (the terminal, in both current users) would otherwise show
+   through. .overlay-menu and .copy-menu compose this with their own
+   anchor point and size. */
+.menu-panel {
   position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 6;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  min-width: 180px;
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1815,9 +1818,8 @@ button { cursor: pointer; }
   border-radius: var(--r-md);
   box-shadow: var(--glass-floating);
 }
-.overlay-menu[hidden] { display: none; }
-.overlay-menu button {
-  padding: 10px 12px;
+.menu-panel[hidden] { display: none; }
+.menu-item {
   border: 0;
   border-radius: var(--r-md);
   background: none;
@@ -1825,7 +1827,16 @@ button { cursor: pointer; }
   font-size: var(--fs-body);
   text-align: left;
 }
-.overlay-menu button:hover { background: var(--surface-hover); }
+.menu-item:hover { background: var(--surface-hover); }
+/* Below the button, aligned to the right edge - like the usage popover on
+   the pill next to it. */
+.overlay-menu {
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 6;
+  min-width: 180px;
+}
+.overlay-menu .menu-item { padding: 10px 12px; }
 
 .mode-switch {
   display: flex;
@@ -2271,7 +2282,6 @@ button { cursor: pointer; }
    from the entry's own variables - which is why every palette block above
    is also hung off .palette-item. Otherwise there'd need to be a second
    list of color values just for the preview. */
-.palette-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .palette-item {
   display: flex;
   align-items: center;
@@ -2372,16 +2382,20 @@ button { cursor: pointer; }
 /* From the warning threshold onward, the heading stands out - the state
    is then no longer just information, but a warning. */
 .settings-section-head[data-warn="true"] { color: var(--danger); }
-.protected-list { max-height: 180px; overflow-y: auto; }
-.protected-row {
+/* A compact, clickable grid row for a scrollable management list -
+   .protected-row and .notify-target compose it with their own column
+   layout. */
+.meta-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: var(--space-md);
   padding: 4px 8px;
   font-size: var(--fs-meta);
 }
-.protected-row:hover { background: var(--surface-hover); border-radius: var(--r-sm); }
+.meta-row:hover { background: var(--surface-hover); border-radius: var(--r-sm); }
+.protected-list { max-height: 180px; overflow-y: auto; }
+/* .meta-row, plus its own column layout. */
+.protected-row { grid-template-columns: 1fr auto auto; }
 .protected-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .protected-project {
   font-family: var(--font-mono);
@@ -2418,18 +2432,10 @@ button { cursor: pointer; }
   line-height: 1.35;
 }
 
-/* Row layout like .protected-row, with two more columns for the actions.
-   The summary shrinks first: it's the least important part of the row and
-   already shortened to the origin on the server. */
-.notify-target {
-  display: grid;
-  grid-template-columns: auto 1fr minmax(0, auto) auto auto auto;
-  align-items: center;
-  gap: var(--space-md);
-  padding: 4px 8px;
-  font-size: var(--fs-meta);
-}
-.notify-target:hover { background: var(--surface-hover); border-radius: var(--r-sm); }
+/* .meta-row, plus its own column layout - two more than .protected-row,
+   for the actions. The summary shrinks first: it's the least important
+   part of the row and already shortened to the origin on the server. */
+.notify-target { grid-template-columns: auto 1fr minmax(0, auto) auto auto auto; }
 .notify-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notify-target-summary {
   font-family: var(--font-mono);
@@ -2596,7 +2602,6 @@ button { cursor: pointer; }
 
 /* Row shape of the management lists - shared between projects and
    accounts, so both tabs look alike and don't drift apart. */
-.manage-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .manage-row {
   display: flex;
   align-items: center;
@@ -3115,11 +3120,6 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: var(--space-xl);
-  /* Explicit 0, not just an absent declaration: the row is a <button>, and
-     without this the browser's own UA-stylesheet border shows through
-     where the drawn border used to sit on top of it (see .session-row). */
-  border: 0;
-  border-radius: var(--r-md);
   /* Side spacing as margin, because .file-content also carries other
      content - as padding on the container, the editor and the image would
      have shifted along with it. The width is therefore explicit: a
@@ -3129,11 +3129,8 @@ button { cursor: pointer; }
   width: calc(100% - 16px);
   background: var(--surface); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
-  box-shadow: var(--glass-card);
   /* Generous, for the thumb. */
   padding: 12px;
-  text-align: left;
-  transition: background var(--dur);
 }
 .file-row:hover {
   background: var(--surface-hover); /* fallback for browsers without color-mix */
@@ -3141,12 +3138,7 @@ button { cursor: pointer; }
 }
 /* Which row is the file currently open on the right. Only became a
    question at all with the two-column view - before that, the list was
-   gone as soon as a file was open. No border left to carry an accent edge
-   (see .session-row[data-active]) - the fill alone marks the row. */
-.file-row[data-active-entry="true"] {
-  background: var(--accent-soft); /* fallback for browsers without color-mix */
-  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent));
-}
+   gone as soon as a file was open. */
 .file-row[data-active-entry="true"] .file-name { color: var(--accent); font-weight: 600; }
 .file-icon { flex: 0 0 auto; color: var(--text-muted); }
 .file-row[data-file-kind="folder"] .file-icon { color: var(--accent); }
@@ -3622,38 +3614,19 @@ button { cursor: pointer; }
 
 /* Only carries the anchor point for the menu - see index.html. */
 .keybar-wrap { position: relative; flex: 0 0 auto; }
+/* Anchored to the bar instead of the viewport: `bottom: 100%` attaches
+   the menu directly above the key bar, without needing to know its
+   height. A viewport anchor would sit underneath the on-screen keyboard
+   on mobile. */
 .copy-menu {
-  /* Anchored to the bar instead of the viewport: `bottom: 100%` attaches
-     the menu directly above the key bar, without needing to know its
-     height. A viewport anchor would sit underneath the on-screen keyboard
-     on mobile. */
-  position: absolute;
   bottom: 100%;
   right: 8px;
   z-index: 40;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
   min-width: 190px;
   margin-bottom: 6px;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
 }
-.copy-menu[hidden] { display: none; }
-.copy-menu button {
-  /* Generously tall: this is purely a thumb target. */
-  padding: 11px 12px;
-  border: 0;
-  border-radius: var(--r-md);
-  background: none;
-  color: var(--text);
-  font-size: var(--fs-body);
-  text-align: left;
-}
-.copy-menu button:hover { background: var(--surface-hover); }
+/* Generously tall: this is purely a thumb target. */
+.copy-menu .menu-item { padding: 11px 12px; }
 .copy-menu-status {
   padding: 2px 12px 6px;
   font-size: var(--fs-ui);
@@ -3687,7 +3660,6 @@ button { cursor: pointer; }
 /* Session lifetime and password, in the Access tab. The lifetime picker
    follows .palette-item: one choice out of a fixed set, marked by its own
    fill rather than an accent-colored edge. */
-.ttl-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .ttl-item {
   width: 100%;
   padding: 7px 8px;

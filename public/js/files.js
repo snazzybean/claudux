@@ -418,7 +418,7 @@ function renderList(data) {
   if (data.parent !== null) {
     const up = document.createElement('button');
     up.type = 'button';
-    up.className = 'file-row file-row-up';
+    up.className = 'row-card file-row file-row-up';
     up.innerHTML = `${svg('back', 'file-icon')}<span class="file-name">Up one level</span>`;
     up.addEventListener('click', () => openDirectory(data.parent));
     content.append(up);

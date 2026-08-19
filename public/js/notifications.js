@@ -111,7 +111,7 @@ function actionButton(iconName, title) {
 
 function row(target, onChange) {
   const el = document.createElement('div');
-  el.className = 'notify-target';
+  el.className = 'meta-row notify-target';
   el.dataset.targetId = target.id;
 
   const toggle = document.createElement('input');

@@ -82,7 +82,7 @@ function renderProtectedList() {
 
   for (const { project, session } of entries) {
     const row = document.createElement('div');
-    row.className = 'protected-row';
+    row.className = 'meta-row protected-row';
     row.innerHTML =
       `<span class="protected-title" title="${escapeHtml(project.name)} › ${escapeHtml(session.title)}">` +
       `${escapeHtml(session.title)}</span>` +

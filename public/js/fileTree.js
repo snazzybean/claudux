@@ -33,7 +33,7 @@ export function formatSize(bytes) {
 export function buildRow(entry, { depth = 0, expandable = false, expanded = false, active = false, onClick }) {
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'file-row';
+  row.className = 'row-card file-row';
   row.dataset.fileKind = entry.type;
   row.style.setProperty('--depth', String(Math.min(depth, MAX_INDENT_DEPTH)));
   if (active) row.dataset.activeEntry = 'true';
