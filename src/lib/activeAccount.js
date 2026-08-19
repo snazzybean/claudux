@@ -8,26 +8,51 @@
 // worse than none once two subscriptions with separate rate limits are in
 // play.
 //
-// Only /proc/<pid>/environ is trustworthy - unlike cmdline, it's readable
-// only by the owner, which is also what the token handoff in
+// The read itself is per platform (see readEnviron below) - only the
+// owner can read either form, which is also what the token handoff in
 // sessionTokenFile.js relies on. Token values are NEVER returned or logged
 // here.
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+
+const execFileAsync = promisify(execFile);
 
 const ENV_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
 
-// environ is NUL-separated, not line-separated.
+// Linux's /proc/<pid>/environ is NUL-separated ("KEY=value\0KEY=value\0…") -
+// exact, no ambiguity: the key must sit right at the start or right after a
+// NUL. macOS has no procfs; `ps -Eww` is the platform's only user-space
+// window into another process's environment, and it joins entries with
+// plain spaces instead ("KEY=value KEY=value …", preceded by the command
+// and its args), where a value containing a space (PATH entries do) would
+// otherwise be mistaken for a key boundary.
+//
+// The two formats need different confidence, not a shared pattern: NUL
+// presence in `raw` proves it's real environ data, so ONLY the exact match
+// is tried there - a whitespace fallback would let a value that merely
+// CONTAINS the key text (e.g. some earlier var's value quoting it) be
+// mistaken for the real variable. Without any NUL, `raw` can only be the
+// ps-style dump, where whitespace is the sole boundary there is.
+const NUL_ANCHORED = new RegExp(`(?:^|\\0)${ENV_KEY}=([^\\0]*)`);
+const WHITESPACE_ANCHORED = new RegExp(`(?:^|\\s)${ENV_KEY}=(\\S*)`);
+
 export function tokenFromEnv(raw) {
   if (typeof raw !== 'string') return null;
-  for (const entry of raw.split('\0')) {
-    // Split at the FIRST '=', not every one: the value itself may contain
-    // equals signs (base64 padding).
-    const sep = entry.indexOf('=');
-    if (sep === -1) continue;
-    if (entry.slice(0, sep) === ENV_KEY) return entry.slice(sep + 1);
+  if (raw.includes('\0')) {
+    const match = raw.match(NUL_ANCHORED);
+    return match ? match[1] : null;
   }
-  return null;
+  const match = raw.match(WHITESPACE_ANCHORED);
+  return match ? match[1] : null;
+}
+
+function readEnviron(pid) {
+  if (os.platform() === 'darwin') {
+    return execFileAsync('ps', ['-Eww', '-p', String(pid)]).then((r) => r.stdout);
+  }
+  return fs.readFile(`/proc/${pid}/environ`, 'utf8');
 }
 
 // A single `tmux list-panes -a` call for all sessions instead of one per
@@ -78,7 +103,7 @@ function listPanes() {
 // never have to leave the store.
 export async function resolveActiveAccounts(resolver, {
   listPanesFn = listPanes,
-  readEnvironFn = (pid) => fs.readFile(`/proc/${pid}/environ`, 'utf8'),
+  readEnvironFn = readEnviron,
 } = {}) {
   const map = new Map();
   for (const { sessionName, panePid } of parsePaneList(await listPanesFn())) {

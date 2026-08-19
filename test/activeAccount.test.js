@@ -31,6 +31,30 @@ test('tokenFromEnv keeps equals signs in the token value', () => {
   assert.equal(tokenFromEnv('CLAUDE_CODE_OAUTH_TOKEN=sk-test-token=a=b'), 'sk-test-token=a=b');
 });
 
+// A NUL anywhere in `raw` proves it's real /proc/<pid>/environ data - the
+// whitespace fallback meant for ps-style output must not also apply here,
+// or a PRECEDING variable's value that happens to quote the key text would
+// be mistaken for the real variable.
+test('tokenFromEnv ignores a whitespace-preceded match when the input is NUL-delimited', () => {
+  const raw = ['FOO=bar CLAUDE_CODE_OAUTH_TOKEN=sk-test-token', 'PATH=/usr/bin'].join('\0');
+
+  assert.equal(tokenFromEnv(raw), null);
+});
+
+// macOS has no /proc; `ps -Eww` is the reader used there instead, and it
+// joins entries with plain spaces instead of NUL bytes, preceded by the
+// command and its args. Some values in that format DO contain a space
+// (PATH entries do) - the regression this guards is that such a value
+// mustn't be mistaken for the key/value boundary of the token that follows.
+test('tokenFromEnv reads the token from ps -Eww style output (macOS, space-separated)', () => {
+  const raw = '89562 ttys014 0:06.30 claude --session-id abc '
+    + 'PATH=/Users/x/Library/Application Support/bin:/usr/bin '
+    + 'CLAUDE_CODE_OAUTH_TOKEN=sk-test-token '
+    + 'TERM=xterm-256color';
+
+  assert.equal(tokenFromEnv(raw), 'sk-test-token');
+});
+
 // `tmux list-panes -a` returns all panes of all sessions in ONE call -
 // important because this lookup runs on every load of the session list,
 // and one call per session would otherwise add up.
