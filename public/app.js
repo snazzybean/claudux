@@ -514,7 +514,7 @@ function buildNewSessionControls(project) {
   if (accountSelect) {
     pinBtn = document.createElement('button');
     pinBtn.type = 'button';
-    pinBtn.className = 'pin-btn';
+    pinBtn.className = 'btn-quiet pin-btn';
     // A pushpin as SVG instead of a text character: such symbols have shown
     // up here before as empty boxes. The body gets filled in via styles.css
     // when a default is set.
@@ -944,7 +944,7 @@ function buildSessionRow(project, session, fallbackAccountSelect) {
     // Only visible in edit mode (see styles.css). The lock protects
     // against the idle reaper, which otherwise ends every unattended
     // session after four hours of quiet.
-    `<span class="lock-btn" role="button" tabindex="0" data-locked="${session.protected ? 'true' : 'false'}"` +
+    `<span class="btn-quiet lock-btn" role="button" tabindex="0" data-locked="${session.protected ? 'true' : 'false'}"` +
     ` title="${session.protected
         ? 'Protected: keeps running even if idle for hours'
         : 'Ends automatically once idle for long enough – tap to protect'}">` +
@@ -1084,7 +1084,7 @@ function buildProjectElement(project, visibleSessions, isOpen) {
   head.title = project.path;
   head.innerHTML =
     // The SVG is aria-hidden, so the title carries the accessible name.
-    `<span class="star-btn" data-fav="${project.favorite}" ` +
+    `<span class="btn-quiet star-btn" data-fav="${project.favorite}" ` +
       `title="${project.favorite ? 'Remove favorite' : 'Mark as favorite'}">` +
       `${svg(project.favorite ? 'starFull' : 'star', 'icon-symbol')}</span>` +
     '<span class="project-name-col">' +
@@ -1093,7 +1093,7 @@ function buildProjectElement(project, visibleSessions, isOpen) {
     '</span>' +
     // An X, not a trash can: "remove" fits better than "delete" - the
     // folder itself stays untouched.
-    `<span class="remove-btn" title="Remove project from the list">${svg('close', 'icon-symbol')}</span>`;
+    `<span class="btn-quiet remove-btn" title="Remove project from the list">${svg('close', 'icon-symbol')}</span>`;
   const toggle = () => {
     project.open = !isOpen;
     render(searchInputEl.value);

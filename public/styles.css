@@ -589,9 +589,12 @@ button { cursor: pointer; }
 
 /* An icon button without a surface of its own: no fill, no edge, the icon
    carries it. The counterpart to .btn-surface for everything sitting inside
-   another control or a row. No hover here either - these buttons split
-   three ways (muted to full, muted to danger, none at all), which is one
-   distinction too many for a modifier. */
+   another control or a row. Three of its hover idioms just pick a target
+   color (muted to full, muted to danger, none at all) - one distinction
+   too many for a modifier, so each user names its own target color
+   locally instead. .btn-fill below is the exception: it changes a
+   different property (background, like .btn-lift/.btn-glow do), so it
+   gets the same kind of named modifier they have. */
 .btn-quiet {
   display: inline-flex;
   align-items: center;
@@ -602,6 +605,7 @@ button { cursor: pointer; }
   color: var(--text-muted);
   transition: color var(--dur);
 }
+.btn-fill:hover { background: var(--accent-soft); }
 
 /* No border-radius here: the setting was meant for the focus ring, but hit
    the focused ELEMENT instead - a card with 12px corners snapped to 4px on
@@ -812,15 +816,10 @@ button { cursor: pointer; }
 }
 .project-head:hover { background: var(--surface-hover); }
 .app[data-edit="on"] .project-head { grid-template-columns: 20px 1fr auto 16px; }
-.star-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--border);
-}
+/* .btn-quiet, plus its own resting color (subtler than --text-muted -
+   an unfavorited star shouldn't compete with the project name next to
+   it) and no hover, the "none at all" case. */
+.star-btn { color: var(--border); }
 .star-btn[data-fav="true"] { color: var(--accent); }
 /* Only visible in edit mode (toggleable in the settings menu below).
    Previously it appeared on hover - there's no hover on mobile, so it was
@@ -830,15 +829,11 @@ button { cursor: pointer; }
    `display: none` instead of opacity 0: an invisible but clickable icon in
    every project row would be exactly the trap this mode is meant to
    prevent. */
+/* .btn-quiet, plus its own padding (fits the 12px icon into the 16px
+   column below) and the edit-mode-only visibility. */
 .remove-btn {
   display: none;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: 0;
   padding: 0 2px;
-  color: var(--text-muted);
-  transition: color var(--dur);
 }
 .app[data-edit="on"] .remove-btn { display: flex; }
 /* The column for it is 16px wide (see .project-head above) - with the
@@ -929,16 +924,12 @@ button { cursor: pointer; }
    below is more specific than a bare class and would otherwise beat
    `display: none`. The remove icon escapes this only because it's a
    `<span>` outside this container. */
+/* .btn-quiet, plus its own padding, the divider against the account
+   chip next to it, and the edit-mode-only visibility. */
 .new-session-controls .pin-btn {
   display: none;
-  align-items: center;
-  justify-content: center;
   padding: 0 6px;
-  border: 0;
   border-left: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  transition: color var(--dur);
 }
 .app[data-edit="on"] .new-session-controls .pin-btn { display: inline-flex; }
 .pin-btn:hover { color: var(--text); }
@@ -1302,15 +1293,12 @@ button { cursor: pointer; }
 .app[data-edit="on"] .session-row {
   grid-template-columns: 14px 1fr 30px auto 18px;
 }
+/* .btn-quiet, plus its own font-size/line-height and the edit-mode-only
+   visibility. */
 .app[data-edit="on"] .lock-btn {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
   font-size: var(--fs-meta);
   line-height: 1;
-  text-align: center;
-  color: var(--text-muted);
-  transition: color var(--dur);
 }
 .lock-btn[data-locked="true"] { color: var(--accent); }
 .lock-btn:hover { color: var(--text); }
@@ -1796,23 +1784,18 @@ button { cursor: pointer; }
   backdrop-filter: none;
 }
 .overlay-menu-wrap { position: relative; display: flex; }
+/* .btn-quiet + .btn-fill, plus its own size, rounding (the fill needs a
+   visible corner, unlike a plain icon) and terminal-context color. */
 .overlay-menu-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   /* Stays under the height of .mode-switch (32px) - that's the tallest
      direct child of the group, see the calculation for --overlay-height. */
   width: 28px;
   height: 26px;
-  padding: 0;
-  border: 0;
   border-radius: var(--r-sm);
-  background: transparent;
   color: var(--term-fg);
   font-size: var(--fs-body);
   line-height: 1;
 }
-.overlay-menu-btn:hover { background: var(--accent-soft); }
 /* Below the button, aligned to the right edge - like the usage popover on
    the pill next to it. Own background, because the terminal underneath
    would otherwise show through. */
@@ -3100,12 +3083,6 @@ button { cursor: pointer; }
   padding: 4px 6px;
 }
 .btn-icon { display: block; }
-.file-btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-.file-btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 
 .file-back {
   display: flex;

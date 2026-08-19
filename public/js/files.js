@@ -112,7 +112,11 @@ function showError(text) {
 function button(label, title, onClick, className = '') {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = `btn-surface btn-lift file-btn ${className}`.trim();
+  // 'primary' takes .btn-accent instead of .btn-surface/.btn-lift - the two
+  // fill classes have equal CSS specificity, so applying both and letting
+  // one win by source order would be fragile.
+  const base = className === 'primary' ? 'btn-accent' : 'btn-surface btn-lift';
+  b.className = `${base} file-btn ${className}`.trim();
   b.textContent = label;
   b.title = title;
   b.setAttribute('aria-label', title);
