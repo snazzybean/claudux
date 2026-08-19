@@ -12,12 +12,13 @@
      "which number". Both scales are read off what the file already does
      most often, so anything adopting them keeps its current size.
 
-     The existing sizes in between (12px and 13px text, 8px and 10px
-     corners) stay where they are. They cover about thirty places, the
-     difference to the neighboring step is invisible, and nothing here has
-     a test that would catch a mistake while converting them. New code
-     takes a step from the scale; anything already written moves over only
-     when it's being touched anyway. */
+     Every font-size and border-radius in the file has been snapped onto
+     this scale (2026-08-19) - no in-between values are left except three
+     that have their own reason, commented at their own declaration
+     (an iOS zoom threshold, a size documented as intentionally larger,
+     a radius proportional to a 2px-wide element rather than to a
+     control). New code takes a step from the scale like everything else
+     already does. */
   --fs-meta: 11px;  /* timestamps, hints, counters */
   --fs-ui: 12.5px;  /* labels on controls - the default */
   --fs-body: 14px;  /* running text, project names */
@@ -26,6 +27,15 @@
   --r-md: 9px;      /* controls and cards - the default */
   --r-lg: 12px;     /* windows and overlays */
   --r-pill: 999px;
+
+  /* Gaps only - padding/margin were never audited and stay off this
+     scale, so reaching for --space-* there would claim a precision the
+     token doesn't have. */
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 6px;  /* row/list gaps - the default */
+  --space-lg: 8px;
+  --space-xl: 12px;
 
   /* Border around the terminal, the buttons on it, AND the terminal's own
      background: CSS can't reach the latter, JS passes the same value in via
@@ -526,7 +536,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--fs-body);
   -webkit-font-smoothing: antialiased;
 }
 button, input {
@@ -629,7 +639,7 @@ button { cursor: pointer; }
   height: var(--overlay-height);
   padding: 0;
   border: 1px solid var(--term-border);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   /* Part of the floating bar above the terminal, hence its look rather
      than the interface's surface color - border included. */
   background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
@@ -637,7 +647,7 @@ button { cursor: pointer; }
   border-color: color-mix(in srgb, var(--term-fg) 22%, transparent);
   box-shadow: var(--glass-button);
   color: var(--term-fg);
-  font-size: 14px;
+  font-size: var(--fs-body);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
@@ -675,7 +685,7 @@ button { cursor: pointer; }
 .sidebar {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   overflow: hidden;
   position: relative; /* anchor for .edge-handle, see index.html */
   margin: 8px 0 8px 8px;
@@ -696,19 +706,19 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
 }
 .wordmark {
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-body);
   letter-spacing: 0.02em;
   white-space: nowrap;
   overflow: hidden;
 }
-.sidebar-head-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.sidebar-head-actions { display: flex; gap: var(--space-md); flex: 0 0 auto; }
 .sidebar-toggle {
   display: flex;
   align-items: center;
@@ -716,7 +726,7 @@ button { cursor: pointer; }
   width: 32px;
   height: 32px;
   padding: 0;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .sidebar-body {
@@ -731,7 +741,7 @@ button { cursor: pointer; }
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
   /* Recessed rather than raised: an input field takes something in, a
@@ -777,7 +787,7 @@ button { cursor: pointer; }
    left to fight the rounded corners in either theme direction. */
 .project {
   margin: 6px 8px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--surface-2);
   box-shadow: var(--glass-surface);
@@ -790,7 +800,7 @@ button { cursor: pointer; }
      roughly 24px away from the right edge. Only the mode adds it. */
   grid-template-columns: 20px 1fr auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 10px 12px;
   background: transparent;
   border: 0;
@@ -835,8 +845,8 @@ button { cursor: pointer; }
    padding, exactly a 12px icon fits inside. */
 .remove-btn svg.icon-symbol { width: 12px; height: 12px; }
 .remove-btn:hover { color: var(--danger); }
-.project-name-col { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.project-name { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-name-col { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
+.project-name { font-weight: 600; font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Hidden: the name alone is enough to tell projects apart in the list, and
    the path stayed available in the tile's title attribute for anyone who
    still needs it. */
@@ -904,7 +914,7 @@ button { cursor: pointer; }
   align-items: center;
   border: 1px solid var(--border);
   border-color: color-mix(in srgb, var(--text) 16%, transparent);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--glass-button);
   overflow: hidden;
   transition: opacity var(--dur), border-color var(--dur);
@@ -986,7 +996,7 @@ button { cursor: pointer; }
   border-radius: 0;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   font-weight: 500;
 }
 .new-session-controls button:hover:not(:disabled) {
@@ -1006,7 +1016,7 @@ button { cursor: pointer; }
   .new-session-controls button:not(:disabled) { color: var(--accent); }
 }
 .new-session-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -1025,7 +1035,7 @@ button { cursor: pointer; }
      running under the right account and still be expired. */
   grid-template-columns: 14px 1fr 30px 26px 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   /* Less on the right than on the left, because the last track is 0 wide
      in normal operation, but its spacing still counts: the account chip
      would otherwise end 18px from the edge and thus visibly inside the
@@ -1051,7 +1061,7 @@ button { cursor: pointer; }
      without this the browser's own UA-stylesheet border (a grey outset
      ring) shows through where the drawn border used to sit on top of it. */
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--surface-hover); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
   box-shadow: var(--glass-card);
@@ -1124,7 +1134,7 @@ button { cursor: pointer; }
   text-overflow: ellipsis;
 }
 .session-name {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   color: var(--text);
 }
 /* While a session is working, a cone of light travels across its title -
@@ -1185,15 +1195,15 @@ button { cursor: pointer; }
   }
 }
 .session-preview {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
 }
 .account-chip {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   font-weight: 700;
   padding: 1px 3px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--text-muted);
   background: var(--surface-2);
   /* Fixed track (see .session-row): an account without a configured
@@ -1235,7 +1245,7 @@ button { cursor: pointer; }
 .error-banner {
   margin: 8px 8px 0;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   box-shadow: var(--glass-button);
 }
 
@@ -1246,9 +1256,9 @@ button { cursor: pointer; }
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 9px 14px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
 }
 /* Signpost back into the assistant while a login is in progress. Built on
    the same strip as the auth banner above it - both say the same thing:
@@ -1257,9 +1267,9 @@ button { cursor: pointer; }
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-xl);
   padding: 9px 14px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text);
   background: var(--surface-2);
   border-color: var(--border);
@@ -1296,7 +1306,7 @@ button { cursor: pointer; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1;
   text-align: center;
   color: var(--text-muted);
@@ -1336,7 +1346,7 @@ button { cursor: pointer; }
 
 .session-time {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   text-align: right; /* "2m" and "16m" end at the same edge */
@@ -1346,7 +1356,7 @@ button { cursor: pointer; }
      sums up that element's indentation (10px .session-scroll + 12px inside
      the card), so the text aligns with the session titles. */
   padding: 2px 12px 8px 22px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -1357,24 +1367,24 @@ button { cursor: pointer; }
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-lg);
 }
 .folder-browser-add-current,
 .accounts-toggle,
 .notify-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   width: 100%;
   padding: 8px 11px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
 }
 .add-project input,
 .accounts-panel input,
 .notify-add input {
   padding: 9px 11px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
   /* Recessed like .search-input - rationale is documented there. */
@@ -1391,7 +1401,7 @@ button { cursor: pointer; }
    scoped to three parents, so the save button of the target edit form and
    every later one rendered as an unstyled white browser button. */
 .btn-accent {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   padding: 9px 12px;
   border-radius: var(--r-md);
   border: 1px solid var(--accent);
@@ -1403,7 +1413,7 @@ button { cursor: pointer; }
 .btn-accent:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 
 .accounts-panel { margin-top: 10px; border-top: 1px solid var(--border); padding: 10px 12px 14px; }
-.accounts-list { margin-bottom: 8px; display: flex; flex-direction: column; gap: 2px; }
+.accounts-list { margin-bottom: 8px; display: flex; flex-direction: column; gap: var(--space-xs); }
 /* Everything else this button needs comes from .btn-quiet and .manage-action,
    which it is always handed together with - only the smaller icon is its
    own. */
@@ -1412,7 +1422,7 @@ button { cursor: pointer; }
    + abbreviation + token + two buttons no longer fit in one row of the
    ~280px-narrow sidebar. The token field gets its own full row below it
    (tokens are ~110 characters long, a narrow field would be unusable). */
-.account-edit-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.account-edit-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
 /* In the management row, the form takes the place of the name and edit
    icon and gets their width - otherwise it crowded together at the left
    edge. */
@@ -1420,9 +1430,9 @@ button { cursor: pointer; }
 .account-edit-form input {
   width: auto;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--surface-2);
   color: var(--text);
 }
@@ -1430,7 +1440,7 @@ button { cursor: pointer; }
 .account-edit-abbr { width: 34px !important; text-align: center; }
 .account-edit-token { flex: 1 0 100%; width: 100% !important; }
 .account-edit-form button {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   padding: 2px 7px;
 }
 /* Same hierarchy as in the large form, but at this row's size: btn-ghost
@@ -1440,7 +1450,7 @@ button { cursor: pointer; }
 .account-edit-form .btn-ghost {
   width: auto;
   margin-top: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   padding: 2px 7px;
 }
 /* Sets itself apart from the save button next to it without glowing red
@@ -1448,24 +1458,24 @@ button { cursor: pointer; }
    the eye to the action you want the least often. */
 .account-edit-delete { margin-left: auto; }
 .account-edit-delete:hover { color: var(--danger); background: var(--danger-soft); }
-.accounts-empty-hint { font-size: 11.5px; color: var(--text-muted); font-style: italic; margin-bottom: 8px; }
-.add-account-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.account-name-row { display: flex; gap: 6px; }
+.accounts-empty-hint { font-size: var(--fs-meta); color: var(--text-muted); font-style: italic; margin-bottom: 8px; }
+.add-account-form { display: flex; flex-direction: column; gap: var(--space-md); margin-top: 8px; }
+.account-name-row { display: flex; gap: var(--space-md); }
 .account-name-row #newAccountName { flex: 1 1 auto; }
 .account-name-row #newAccountAbbr { flex: 0 0 64px; width: 64px; text-align: center; }
 
 .folder-browser {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--surface-2);
   padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-sm);
 }
 .folder-browser-path {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   padding: 2px 4px 6px;
   word-break: break-all;
@@ -1479,27 +1489,27 @@ button { cursor: pointer; }
 .folder-browser-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-sm);
 }
 .folder-browser-open {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   text-align: left;
   padding: 6px 8px;
   border: 0;
   background: transparent;
-  border-radius: 8px;
-  font-size: 12.5px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-ui);
   color: var(--text);
 }
 .folder-browser-open:hover { background: var(--surface-hover); }
-.folder-browser-empty { font-size: 11.5px; color: var(--text-muted); font-style: italic; padding: 4px 6px; }
+.folder-browser-empty { font-size: var(--fs-meta); color: var(--text-muted); font-style: italic; padding: 4px 6px; }
 
 .add-project-confirm {
   display: flex;
-  gap: 6px;
+  gap: var(--space-md);
 }
 .add-project-confirm input { flex: 1 1 auto; }
 .add-project[hidden],
@@ -1509,12 +1519,12 @@ button { cursor: pointer; }
   width: 100%;
   margin-top: 4px;
   padding: 8px 10px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   background: transparent;
   border-color: color-mix(in srgb, var(--text) 16%, transparent);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   font-weight: 500;
   transition: background var(--dur), color var(--dur);
 }
@@ -1530,7 +1540,7 @@ button { cursor: pointer; }
 .login-step {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 14px 0;
   border-top: 1px solid var(--border);
 }
@@ -1558,7 +1568,7 @@ button { cursor: pointer; }
 .add-account-form { counter-reset: loginstep; }
 .login-step:not([hidden]) { counter-increment: loginstep; }
 .login-step-header {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -1573,7 +1583,7 @@ button { cursor: pointer; }
    `color`. */
 .login-waiting {
   margin: 2px 8px 4px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   background-image: linear-gradient(
     100deg,
@@ -1613,7 +1623,7 @@ button { cursor: pointer; }
    traceable what got saved. */
 .login-success {
   margin: 2px 8px 4px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text);
 }
 .login-success[hidden] { display: none; }
@@ -1626,10 +1636,10 @@ button { cursor: pointer; }
    the affected entry wouldn't be findable among the others. */
 .account-marker {
   color: var(--live);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
 }
-.token-manual { display: flex; flex-direction: column; gap: 6px; }
+.token-manual { display: flex; flex-direction: column; gap: var(--space-md); }
 .token-manual[hidden] { display: none; }
 .link-btn {
   padding: 0;
@@ -1700,7 +1710,7 @@ button { cursor: pointer; }
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   pointer-events: none;
 }
 .panel-overlay > * { pointer-events: auto; }
@@ -1756,9 +1766,9 @@ button { cursor: pointer; }
 .overlay-group {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-sm);
   padding: 2px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--term-bg) 82%, transparent);
   border: 1px solid var(--term-border);
@@ -1796,10 +1806,10 @@ button { cursor: pointer; }
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--term-fg);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1;
 }
 .overlay-menu-btn:hover { background: var(--accent-soft); }
@@ -1819,26 +1829,26 @@ button { cursor: pointer; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   box-shadow: var(--glass-floating);
 }
 .overlay-menu[hidden] { display: none; }
 .overlay-menu button {
   padding: 10px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: none;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--fs-body);
   text-align: left;
 }
 .overlay-menu button:hover { background: var(--surface-hover); }
 
 .mode-switch {
   display: flex;
-  gap: 2px;
+  gap: var(--space-xs);
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--term-bg) 82%, transparent);
   border: 1px solid var(--term-border);
@@ -1855,7 +1865,7 @@ button { cursor: pointer; }
   height: 26px;
   padding: 4px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--term-fg);
   opacity: 0.55;
@@ -1870,11 +1880,11 @@ button { cursor: pointer; }
 .account-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-md);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 5px 11px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: rgba(20, 23, 29, 0.82); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--term-bg) 82%, transparent);
   border: 1px solid var(--term-border);
@@ -1909,14 +1919,14 @@ button { cursor: pointer; }
   max-height: calc(var(--app-height, 100dvh) - 72px);
   overflow-y: auto;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: rgba(20, 23, 29, 0.97); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--term-bg) 97%, transparent);
   border: 1px solid var(--term-border);
   border-color: color-mix(in srgb, var(--term-fg) 22%, transparent);
   color: var(--term-fg);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
@@ -1941,7 +1951,7 @@ button { cursor: pointer; }
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-xl);
   margin-bottom: 10px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--term-border);
@@ -1956,14 +1966,14 @@ button { cursor: pointer; }
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-xl);
 }
 .usage-label { opacity: 0.75; }
 .usage-value { font-variant-numeric: tabular-nums; }
 .usage-extra {
   display: block;
   opacity: 0.6;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   margin-top: 3px;
 }
@@ -1978,14 +1988,14 @@ button { cursor: pointer; }
   display: block;
   height: 10px;
   margin-top: 5px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: rgba(127, 127, 127, 0.25);
   overflow: hidden;
 }
 .usage-bar > span {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: currentColor;
 }
 /* The same four tiers as in the terminal's statusline script, so the
@@ -2005,7 +2015,7 @@ button { cursor: pointer; }
   padding-top: 8px;
   border-top: 1px solid var(--term-border);
   opacity: 0.6;
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 .usage-footer.usage-error {
   opacity: 0.95;
@@ -2015,7 +2025,7 @@ button { cursor: pointer; }
 
 /* Account switch in the popover: select and button on one line, the note
    below in the muted hint style already used here. */
-.usage-switch { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.usage-switch { display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .usage-switch select { flex: 1 1 auto; min-width: 0; }
 /* Plain browser chrome would read as a foreign white box on this dark
    glass surface - matched to the popover's own border and text color. */
@@ -2023,7 +2033,7 @@ button { cursor: pointer; }
 .usage-switch button {
   font: inherit;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--term-border);
   background: transparent;
   color: var(--term-fg);
@@ -2037,12 +2047,12 @@ button { cursor: pointer; }
   /* display is set to none/flex in js/messages.js - only the remaining values
      here. */
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-xl);
   padding: 9px 14px;
   background: var(--danger-soft);
   color: var(--danger);
   border-color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
 }
 .error-banner span { flex: 1 1 auto; min-width: 0; }
 .error-banner-close {
@@ -2060,7 +2070,6 @@ button { cursor: pointer; }
   border: 0;
   color: inherit;
   opacity: 0.7;
-  font-size: 15px;
   line-height: 1;
 }
 .error-banner-close:hover { opacity: 1; }
@@ -2069,7 +2078,7 @@ button { cursor: pointer; }
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--term-border);
   background: var(--term-bg);
 }
@@ -2082,7 +2091,7 @@ button { cursor: pointer; }
   display: none;
   flex: 0 0 auto;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-md);
   padding: 8px 18px 14px;
 }
 /* Only this row scrolls. The arrow block on the right and the expand
@@ -2096,7 +2105,7 @@ button { cursor: pointer; }
   overflow-x: auto;
   overscroll-behavior-x: contain; /* swiping doesn't spill over onto the page */
   scrollbar-width: none; /* the bar is narrow, a scrollbar in it hurts more than it helps */
-  gap: 6px;
+  gap: var(--space-md);
 }
 .keybar-keys::-webkit-scrollbar { display: none; }
 /* Expanded, a grid with equal-width columns instead of wrapping flex: when
@@ -2129,7 +2138,7 @@ button { cursor: pointer; }
 .keybar-arrows {
   display: grid;
   grid-template-columns: repeat(2, auto);
-  gap: 6px;
+  gap: var(--space-md);
   flex: 0 0 auto;
 }
 .keybar-arrows [data-key="ArrowLeft"],
@@ -2151,7 +2160,7 @@ button { cursor: pointer; }
 }
 .keybar button {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   /* Fixed height instead of computing it from padding: some keys carry
      text, others an SVG with no line-height - deriving it from padding
      produced keys of different heights in the same row. 40px balances the
@@ -2202,7 +2211,7 @@ button { cursor: pointer; }
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-md);
   margin: 0 12px 8px;
   padding: 10px;
   border-radius: var(--r-md);
@@ -2211,7 +2220,7 @@ button { cursor: pointer; }
   box-shadow: var(--glass-card);
 }
 .update-card[hidden] { display: none; }
-.update-head { display: flex; align-items: center; gap: 6px; }
+.update-head { display: flex; align-items: center; gap: var(--space-md); }
 .update-title { font-size: var(--fs-ui); font-weight: 600; }
 .update-notes { margin-left: auto; font-size: var(--fs-meta); color: var(--text-muted); }
 .update-notes[hidden] { display: none; }
@@ -2228,10 +2237,10 @@ button { cursor: pointer; }
 .manage-toggle {
   width: 100%;
   padding: 8px 11px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   text-align: left;
 }
-.sidebar-foot { display: flex; gap: 6px; align-items: flex-start; }
+.sidebar-foot { display: flex; gap: var(--space-md); align-items: flex-start; }
 .manage-toggle { flex: 1 1 auto; }
 .settings-toggle {
   display: flex;
@@ -2241,7 +2250,7 @@ button { cursor: pointer; }
   justify-content: center;
   width: 32px;
   height: 32px;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 /* Terminal base tone in three tiers. Border and content always carry the
    same value - CSS can't reach the content, JS passes it there via ttyd's
@@ -2279,18 +2288,18 @@ button { cursor: pointer; }
    from the entry's own variables - which is why every palette block above
    is also hung off .palette-item. Otherwise there'd need to be a second
    list of color values just for the preview. */
-.palette-list { display: flex; flex-direction: column; gap: 2px; }
+.palette-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .palette-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   width: 100%;
   padding: 7px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: none;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   text-align: left;
   transition: background var(--dur);
 }
@@ -2328,14 +2337,14 @@ button { cursor: pointer; }
 .settings-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   width: 100%;
   padding: 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   text-align: left;
   cursor: pointer;
 }
@@ -2373,7 +2382,7 @@ button { cursor: pointer; }
 }
 .settings-section-head {
   padding: 2px 8px 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -2385,15 +2394,15 @@ button { cursor: pointer; }
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   padding: 4px 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
 }
-.protected-row:hover { background: var(--surface-hover); border-radius: 6px; }
+.protected-row:hover { background: var(--surface-hover); border-radius: var(--r-sm); }
 .protected-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .protected-project {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   max-width: 70px;
   overflow: hidden;
@@ -2402,9 +2411,9 @@ button { cursor: pointer; }
 }
 .protected-row .btn-ghost {
   padding: 2px 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-muted);
 }
@@ -2412,16 +2421,16 @@ button { cursor: pointer; }
 .settings-warn {
   margin: 6px 8px 2px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.4;
 }
 
 .settings-hint {
   margin: 2px 8px 4px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   line-height: 1.35;
 }
@@ -2433,15 +2442,15 @@ button { cursor: pointer; }
   display: grid;
   grid-template-columns: auto 1fr minmax(0, auto) auto auto auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   padding: 4px 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
 }
-.notify-target:hover { background: var(--surface-hover); border-radius: 6px; }
+.notify-target:hover { background: var(--surface-hover); border-radius: var(--r-sm); }
 .notify-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notify-target-summary {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2456,7 +2465,7 @@ button { cursor: pointer; }
   width: 30px;
   height: 30px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-muted);
   transition: background var(--dur), color var(--dur);
@@ -2468,13 +2477,13 @@ button { cursor: pointer; }
 .notify-form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-md);
   margin-top: 8px;
 }
 /* One choice out of a few, side by side. Named for the shape rather than
    for the notification targets it was built for - the project settings pick
    their level with the same control. */
-.segmented { display: flex; gap: 6px; }
+.segmented { display: flex; gap: var(--space-md); }
 .segmented .palette-item {
   flex: 1 1 0;
   justify-content: center;
@@ -2489,16 +2498,16 @@ button { cursor: pointer; }
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   color: var(--text);
 }
-.notify-fields { display: flex; flex-direction: column; gap: 6px; }
+.notify-fields { display: flex; flex-direction: column; gap: var(--space-md); }
 /* Indented under its row, so an open form reads as belonging to it rather
    than to the list. */
 .notify-edit { margin: 2px 8px 8px; padding-left: 8px; border-left: 2px solid var(--border); }
-.notify-edit input { font-size: 12px; }
+.notify-edit input { font-size: var(--fs-ui); }
 .notify-target-action.open { background: var(--surface-hover); color: var(--text); }
 /* The fields carry no labels of their own. Muted instead of the browser
    default, which sat near invisible on the dark surface. */
 .notify-add input::placeholder { color: var(--text-muted); }
-.notify-error { margin: 0 2px; color: var(--danger); font-size: 11px; }
+.notify-error { margin: 0 2px; color: var(--danger); font-size: var(--fs-meta); }
 
 .manage-dialog {
   width: min(560px, calc(100vw - 24px));
@@ -2513,7 +2522,7 @@ button { cursor: pointer; }
   padding: 0;
   border: 1px solid var(--border);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--glass-floating);
@@ -2542,7 +2551,7 @@ button { cursor: pointer; }
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 13.5px;
+  font-size: var(--fs-body);
 }
 .manage-close {
   display: flex;
@@ -2552,7 +2561,7 @@ button { cursor: pointer; }
   background: transparent;
   color: var(--text-muted);
   padding: 7px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .manage-close:hover { color: var(--text); background: var(--surface-hover); }
 /* Tabs in the settings window. Horizontally scrollable instead of
@@ -2560,7 +2569,7 @@ button { cursor: pointer; }
    would cost height the content needs. */
 .manage-tabs {
   display: flex;
-  gap: 2px;
+  gap: var(--space-xs);
   padding: 8px 10px 0;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -2574,7 +2583,7 @@ button { cursor: pointer; }
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   transition: color var(--dur), border-color var(--dur);
 }
 .manage-tab:hover { color: var(--text); }
@@ -2604,22 +2613,22 @@ button { cursor: pointer; }
 
 /* Row shape of the management lists - shared between projects and
    accounts, so both tabs look alike and don't drift apart. */
-.manage-list { display: flex; flex-direction: column; gap: 2px; }
+.manage-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .manage-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 7px 8px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .manage-row:hover { background: var(--surface-2); }
 .manage-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.manage-name { font-size: 12.5px; color: var(--text); }
+.manage-name { font-size: var(--fs-ui); color: var(--text); }
 /* The path runs past the row on mobile - truncate instead of wrapping,
    otherwise the row becomes two lines and the list looks restless. */
 .manage-path {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2645,7 +2654,7 @@ button { cursor: pointer; }
 .manage-detail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   padding-bottom: 8px;
 }
 /* The first visible <select> in this UI: the two older ones lie invisibly
@@ -2690,7 +2699,7 @@ button { cursor: pointer; }
 .settings-item-stacked {
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--space-md);
   cursor: default;
 }
 .settings-item-stacked:hover { background: transparent; }
@@ -2713,7 +2722,7 @@ button { cursor: pointer; }
   z-index: 9999;
   padding: 6px 8px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   white-space: pre;
   color: #7fe0a8;
@@ -2751,9 +2760,9 @@ button { cursor: pointer; }
   color: var(--text);
   border: 1px solid var(--border);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 11px 15px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   box-shadow: var(--glass-floating);
   /* Sits inside .terminal-wrap, i.e. over terminal text - here the blur
      smudges real content and actually contributes something (unlike in
@@ -2807,7 +2816,7 @@ button { cursor: pointer; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   flex: 1 1 auto;
   min-height: 0;
   padding: 10px 6px;
@@ -2822,7 +2831,7 @@ button { cursor: pointer; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-lg);
   width: 100%;
 }
 .rail-zones::-webkit-scrollbar { display: none; }
@@ -2840,7 +2849,7 @@ button { cursor: pointer; }
   height: 32px;
   flex: 0 0 auto;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .rail-btn svg { display: block; }
 .rail-tile {
@@ -2853,7 +2862,7 @@ button { cursor: pointer; }
   flex: 0 0 auto;
   padding: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   font-weight: 600;
 }
 .rail-tile[data-active="true"] {
@@ -2935,7 +2944,7 @@ button { cursor: pointer; }
   min-height: 0;
   display: flex;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   background: var(--surface);
   /* Room for the floating overlay bar (back, tab switcher, account pill),
@@ -2959,7 +2968,7 @@ button { cursor: pointer; }
   align-items: center;
   overflow: auto;
   padding: calc(var(--overlay-height) + 8px) 16px 16px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   background: var(--surface);
 }
@@ -2976,7 +2985,7 @@ button { cursor: pointer; }
 .onboarding-step {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 14px 0;
   border-top: 1px solid var(--border);
 }
@@ -2987,7 +2996,7 @@ button { cursor: pointer; }
   opacity: 0.5;
 }
 .onboarding-step-header {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -3038,7 +3047,7 @@ button { cursor: pointer; }
 .file-header {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-sm);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
@@ -3060,7 +3069,7 @@ button { cursor: pointer; }
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   white-space: nowrap;
 }
 .file-breadcrumbs::-webkit-scrollbar { display: none; }
@@ -3069,7 +3078,7 @@ button { cursor: pointer; }
   background: transparent;
   padding: 4px 2px;
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--fs-ui);
 }
 .file-breadcrumbs button[data-current="true"] { color: var(--text); }
 .breadcrumb-separator { color: var(--text-muted); padding: 0 2px; }
@@ -3077,7 +3086,7 @@ button { cursor: pointer; }
 .file-btn {
   flex: 0 0 auto;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
 }
 .file-btn-icon-only {
   /* Thumb-friendly and still narrow: square instead of wide text.
@@ -3101,20 +3110,20 @@ button { cursor: pointer; }
 .file-back {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   flex: 1 1 auto;
   min-width: 0;
   border: 0;
   background: transparent;
   padding: 4px 2px;
   color: var(--accent);
-  font-size: 14px;
+  font-size: var(--fs-body);
   text-align: left;
 }
 .file-title {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3128,12 +3137,12 @@ button { cursor: pointer; }
 .file-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-xl);
   /* Explicit 0, not just an absent declaration: the row is a <button>, and
      without this the browser's own UA-stylesheet border shows through
      where the drawn border used to sit on top of it (see .session-row). */
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   /* Side spacing as margin, because .file-content also carries other
      content - as padding on the container, the editor and the image would
      have shifted along with it. The width is therefore explicit: a
@@ -3170,30 +3179,30 @@ button { cursor: pointer; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .file-size {
   flex: 0 0 auto;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   text-align: right;
 }
 
 .file-hint {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   padding: 16px 12px 8px;
   margin: 0;
 }
 .file-error {
   margin: 12px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--danger);
   background: var(--danger-soft);
   box-shadow: var(--glass-button);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .file-content > .file-btn { margin: 0 12px 12px; }
 
@@ -3205,7 +3214,7 @@ button { cursor: pointer; }
   max-height: calc(100% - 24px);
   margin: 12px;
   object-fit: contain;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   border-color: color-mix(in srgb, var(--text) 16%, transparent);
   box-shadow: var(--glass-button);
@@ -3218,7 +3227,7 @@ button { cursor: pointer; }
 .file-editor-bar {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-lg);
   padding: 8px 12px;
 }
 .file-textarea {
@@ -3229,7 +3238,7 @@ button { cursor: pointer; }
      value. */
   min-height: calc(var(--app-height, 100dvh) * 0.5);
   padding: 10px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   background: var(--bg);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
@@ -3237,18 +3246,18 @@ button { cursor: pointer; }
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   resize: vertical;
 }
 .file-conflict {
   margin: 12px 12px 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--danger);
   background: var(--danger-soft);
   box-shadow: var(--glass-button);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .file-conflict p { margin: 0 0 8px; }
 .file-conflict .file-editor-bar { padding: 0; flex-wrap: wrap; }
@@ -3263,7 +3272,7 @@ button { cursor: pointer; }
   margin: 0;
   padding: 8px 12px;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   line-height: 1.55;
   overflow-x: auto;
 }
@@ -3271,7 +3280,7 @@ button { cursor: pointer; }
 .code-line {
   display: grid;
   grid-template-columns: var(--number-column, 3ch) 1fr;
-  column-gap: 12px;
+  column-gap: var(--space-xl);
   counter-increment: line;
 }
 .code-line::before {
@@ -3306,7 +3315,7 @@ button { cursor: pointer; }
 /* ---------- Markdown ---------- */
 .markdown-body {
   padding: 12px 14px 24px;
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -3327,18 +3336,18 @@ button { cursor: pointer; }
   font-family: var(--font-mono);
   font-size: 0.88em;
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: var(--surface-2);
 }
 .markdown-body pre {
   margin: 0 0 1em;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   background: var(--surface-2);
   overflow-x: auto;
 }
-.markdown-body pre code { padding: 0; background: transparent; font-size: 12.5px; }
+.markdown-body pre code { padding: 0; background: transparent; font-size: var(--fs-ui); }
 .markdown-body blockquote {
   margin: 0 0 1em;
   padding: 2px 0 2px 12px;
@@ -3346,13 +3355,13 @@ button { cursor: pointer; }
   color: var(--text-muted);
 }
 .markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.markdown-body img { max-width: 100%; border-radius: 6px; }
+.markdown-body img { max-width: 100%; border-radius: var(--r-sm); }
 .markdown-body table {
   border-collapse: collapse;
   margin: 0 0 1em;
   display: block;
   overflow-x: auto;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .markdown-body th, .markdown-body td {
   border: 1px solid var(--border);
@@ -3380,6 +3389,8 @@ button { cursor: pointer; }
   content: '';
   position: absolute;
   inset: 0 2px;
+  /* Proportional to this bar's own 2px width, not to --r-sm (6px) - a
+     control-scale radius would round it into a pill. */
   border-radius: 2px;
   background: var(--accent);
   opacity: 0;
@@ -3424,7 +3435,7 @@ button { cursor: pointer; }
   padding: 6px 8px 6px calc(8px + var(--depth, 0) * 20px);
   background-color: transparent;
   box-shadow: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .file-content-tree .file-row:hover {
   background-color: color-mix(in srgb, var(--surface-2) 78%, var(--text));
@@ -3464,7 +3475,7 @@ button { cursor: pointer; }
    already, so there is nothing left to navigate to. */
 .file-tree-path {
   display: flex;
-  gap: 4px;
+  gap: var(--space-sm);
   align-items: baseline;
   min-width: 0;
   font-size: var(--fs-ui);
@@ -3518,7 +3529,7 @@ button { cursor: pointer; }
 .markdown-body .markdown-alert-title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-md);
   margin: 0 0 6px;
   color: var(--alert-tone);
   font-size: var(--fs-ui);
@@ -3610,7 +3621,7 @@ button { cursor: pointer; }
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-family: var(--font-mono);
   /* Noticeably larger than in the terminal (11px on mobile): there the
      column count matters, here readability does - the text wraps anyway. */
@@ -3651,7 +3662,7 @@ button { cursor: pointer; }
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
 }
 .copy-menu[hidden] { display: none; }
@@ -3659,16 +3670,16 @@ button { cursor: pointer; }
   /* Generously tall: this is purely a thumb target. */
   padding: 11px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: none;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--fs-body);
   text-align: left;
 }
 .copy-menu button:hover { background: var(--surface-hover); }
 .copy-menu-status {
   padding: 2px 12px 6px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   opacity: 0.85;
 }
 .copy-menu-status:empty { display: none; }
@@ -3678,7 +3689,7 @@ button { cursor: pointer; }
 .push-activation {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-lg);
   margin-bottom: 12px;
 }
 
@@ -3688,7 +3699,7 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-lg);
   min-height: 40px;
 }
 
@@ -3699,7 +3710,7 @@ button { cursor: pointer; }
 /* Session lifetime and password, in the Access tab. The lifetime picker
    follows .palette-item: one choice out of a fixed set, marked by its own
    fill rather than an accent-colored edge. */
-.ttl-list { display: flex; flex-direction: column; gap: 2px; }
+.ttl-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .ttl-item {
   width: 100%;
   padding: 7px 8px;
@@ -3719,7 +3730,7 @@ button { cursor: pointer; }
 .access-form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-md);
   padding: 0 8px;
 }
 .access-form input {
