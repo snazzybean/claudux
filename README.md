@@ -55,6 +55,24 @@ Desktop and phone get the same features; what a small screen makes awkward
 (no hover, no Ctrl key, a keyboard covering half the page) has its own answer
 here rather than being left to the browser.
 
+## vs. Claude Code's own Remote Control
+
+Claude Code can hand a single running session to the mobile app
+(`/remote-control`). claudux solves a related but different problem — a
+standing home for sessions, not a one-off hand-off:
+
+- **No timeout.** A claudux session lives in tmux on the server, not tied to
+  the connection — nobody watching it for hours changes nothing.
+- **No app required.** Any browser reaches it, phone or otherwise.
+- **Every project and session in one sidebar**, not just the one being
+  handed off.
+- **Self-hosted.** Sessions and notifications go through your own server,
+  not Anthropic's relay.
+
+Remote Control is the right tool for stepping away from the desk mid-task.
+claudux is for projects that live somewhere permanently and get checked in
+on.
+
 ## Requirements
 
 | | |
