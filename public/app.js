@@ -1149,7 +1149,7 @@ function buildProjectElement(project, visibleSessions, isOpen) {
   // sit on .session-panel - the expand/collapse animation runs on that, and
   // having both on one property would interfere with each other.
   const sessionScroll = document.createElement('div');
-  sessionScroll.className = 'session-scroll';
+  sessionScroll.className = 'no-scrollbar session-scroll';
   // Only for an open project. A collapsed one clips its rows away entirely
   // (max-height: 0 plus overflow: hidden above), so building them puts work
   // into nodes nobody can see - with a three-digit history across several
@@ -1225,7 +1225,7 @@ function renderRail() {
   sidebarRailEl.appendChild(search);
 
   const zones = document.createElement('div');
-  zones.className = 'rail-zones';
+  zones.className = 'no-scrollbar rail-zones';
 
   // Running sessions across all projects. The initials come from the
   // PROJECT, not the account: that's already in the pill above the

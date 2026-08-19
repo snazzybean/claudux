@@ -331,7 +331,7 @@ function buildHeader() {
 
 function buildBreadcrumbs(path) {
   const nav = document.createElement('nav');
-  nav.className = 'file-breadcrumbs';
+  nav.className = 'no-scrollbar file-breadcrumbs';
   nav.setAttribute('aria-label', 'Path');
   const parts = path ? path.split('/') : [];
 

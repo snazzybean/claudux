@@ -91,6 +91,11 @@
      their background. */
   --glass-floating:
     0 10px 28px rgba(0, 0, 0, 0.38);
+  /* The opposite direction: recessed rather than raised, for controls that
+     read as a hole to type into instead of a surface sitting above the
+     page. See .search-input for the fuller rationale. */
+  --glass-inset:
+    inset 0 1px 3px rgba(0, 0, 0, 0.14);
 }
 
 /* ---------- Color palettes ----------
@@ -752,7 +757,7 @@ button { cursor: pointer; }
      button gives something out - hence the inward shadow here and no light
      edge on top. The same light, just thought through from the other
      side. */
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--glass-inset);
   color: var(--text);
 }
 .search-input::placeholder { color: var(--text-muted); }
@@ -871,6 +876,10 @@ button { cursor: pointer; }
    animation runs on that element, and having both on the same property
    would interfere with each other. With few sessions the container stays
    short on its own, so no empty space is created. */
+/* Hides the scrollbar without disabling scroll - used where a visible bar
+   would compete with a narrow track rather than help. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 .session-scroll {
   max-height: 300px;
   /* The bottom spacing sits here and not on .session-panel: that element's
@@ -884,9 +893,7 @@ button { cursor: pointer; }
   padding: 6px 10px 4px;
   overflow-y: auto;
   overscroll-behavior: contain; /* scrolling doesn't spill over into the project list */
-  scrollbar-width: none; /* the track is narrow, a bar in it hurts more than it helps */
 }
-.session-scroll::-webkit-scrollbar { display: none; }
 /* Bottom fade so a long list hints there's more below without a scrollbar
    to look at - set by updateScrollFade() in app.js, on scroll and after
    every rebuild. A mask fades to the element's own transparency instead of
@@ -1194,6 +1201,9 @@ button { cursor: pointer; }
 .account-chip {
   font-family: var(--font-mono);
   font-size: var(--fs-meta);
+  /* Heavier than the usual label weight (500/600): at the smallest step
+     of the type scale, a monospace abbreviation needs the extra weight
+     to stay legible. */
   font-weight: 700;
   padding: 1px 3px;
   border-radius: var(--r-sm);
@@ -1377,8 +1387,7 @@ button { cursor: pointer; }
   border-radius: var(--r-md);
   background: var(--surface-2);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
-  /* Recessed like .search-input - rationale is documented there. */
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--glass-inset);
   color: var(--text);
   width: 100%;
 }
@@ -1975,7 +1984,7 @@ button { cursor: pointer; }
    therefore allowed to hold back less than the other labels. */
 .usage-forecast {
   opacity: 0.85;
-  color: #c8a13a;
+  color: var(--tier-warn);
 }
 
 .usage-bar {
@@ -1995,14 +2004,19 @@ button { cursor: pointer; }
 /* The same four tiers as in the terminal's statusline script, so the
    terminal and browser never show different colors for the same state.
    The tier-to-color mapping is decided by the server (see
-   routes/usage.js). The colors sit here directly rather than as theme
-   variables: the popover sits on top of the terminal, i.e. always on a
-   dark background - the light theme values (--live, --danger) would be
-   too dark there. */
+   routes/usage.js). Fixed tokens rather than theme variables: the
+   popover sits on top of the terminal, i.e. always on a dark
+   background - the light theme values (--live, --danger) would be too
+   dark there. --tier-dim has only this one user and stays literal. */
+:root {
+  --tier-ok: #5aa469;
+  --tier-warn: #c8a13a;
+  --tier-crit: #d4736b;
+}
 .usage-bar.tier-dim { color: rgba(148, 155, 168, 0.85); }
-.usage-bar.tier-ok { color: #5aa469; }
-.usage-bar.tier-warn { color: #c8a13a; }
-.usage-bar.tier-crit { color: #d4736b; }
+.usage-bar.tier-ok { color: var(--tier-ok); }
+.usage-bar.tier-warn { color: var(--tier-warn); }
+.usage-bar.tier-crit { color: var(--tier-crit); }
 
 .usage-footer {
   margin-top: 12px;
@@ -2013,7 +2027,7 @@ button { cursor: pointer; }
 }
 .usage-footer.usage-error {
   opacity: 0.95;
-  color: #d4736b;
+  color: var(--tier-crit);
 }
 .usage-hint { opacity: 0.6; }
 
@@ -2098,10 +2112,8 @@ button { cursor: pointer; }
   flex-wrap: nowrap;
   overflow-x: auto;
   overscroll-behavior-x: contain; /* swiping doesn't spill over onto the page */
-  scrollbar-width: none; /* the bar is narrow, a scrollbar in it hurts more than it helps */
   gap: var(--space-md);
 }
-.keybar-keys::-webkit-scrollbar { display: none; }
 /* Expanded, a grid with equal-width columns instead of wrapping flex: when
    wrapping, each key aligned to the width of its own label, which made
    the rows reach different distances and created gaps - the bar looked
@@ -2562,9 +2574,7 @@ button { cursor: pointer; }
   padding: 8px 10px 0;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
-  scrollbar-width: none;
 }
-.manage-tabs::-webkit-scrollbar { display: none; }
 .manage-tab {
   flex: 0 0 auto;
   padding: 7px 11px;
@@ -2815,14 +2825,12 @@ button { cursor: pointer; }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-lg);
   width: 100%;
 }
-.rail-zones::-webkit-scrollbar { display: none; }
 .rail-separator {
   width: 22px;
   height: 1px;
@@ -3056,11 +3064,9 @@ button { cursor: pointer; }
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: none;
   font-size: var(--fs-ui);
   white-space: nowrap;
 }
-.file-breadcrumbs::-webkit-scrollbar { display: none; }
 .file-breadcrumbs button {
   border: 0;
   background: transparent;
@@ -3211,8 +3217,7 @@ button { cursor: pointer; }
   border: 1px solid var(--border);
   background: var(--bg);
   border-color: color-mix(in srgb, var(--text) 14%, transparent);
-  /* Recessed like .search-input - rationale is documented there. */
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--glass-inset);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--fs-body);
