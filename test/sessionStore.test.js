@@ -10,6 +10,25 @@ test('encodeProjectPath replaces slashes with dashes', () => {
   assert.equal(encodeProjectPath('/srv/project'), '-srv-project');
 });
 
+// Claude Code's own encoding turns EVERY non-alphanumeric character into a
+// dash, not just slashes - an underscore in the project's directory name
+// (e.g. "open_source") is exactly this case, and it went unnoticed because
+// every project this app has been tested against so far had a path made up
+// of only letters, digits and slashes.
+test('encodeProjectPath replaces underscores and other punctuation with dashes too', () => {
+  assert.equal(
+    encodeProjectPath('/Users/example/open_source/myproject'),
+    '-Users-example-open-source-myproject',
+  );
+});
+
+// A path segment starting with a dot (a worktree under a dotfile directory)
+// produces two adjacent dashes - one for the slash, one for the dot - and
+// they are NOT collapsed into one, matching Claude Code's own output.
+test('encodeProjectPath does not collapse adjacent dashes from consecutive special characters', () => {
+  assert.equal(encodeProjectPath('/srv/x/.claude/y'), '-srv-x--claude-y');
+});
+
 test('listSessions reads title from last-prompt lines and mtime from the file', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-test-'));
   const projectDir = path.join(tmp, 'projects', '-srv-project');

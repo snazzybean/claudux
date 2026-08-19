@@ -165,8 +165,17 @@ function readDescription(fullPath, fileSize) {
   return describeContent(fs.readFileSync(fullPath, 'utf8'));
 }
 
+// Mirrors Claude Code's own encoding of the cwd into a projects/ directory
+// name - EVERY non-alphanumeric character becomes its own dash, not just
+// the slashes. Confirmed against this host's own ~/.claude/projects: a path
+// containing "/." (a worktree under a dotfile dir) comes out with a double
+// dash ("--"), and a path with an underscore comes out with the underscore
+// turned into a dash too. Replacing only slashes looks right for the common
+// case and silently stops finding the project's history the first time its
+// path contains anything else - the mismatch fails quiet: listSessions()
+// below just sees a directory that doesn't exist and returns no history.
 export function encodeProjectPath(absPath) {
-  return absPath.replace(/\//g, '-');
+  return absPath.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 export function listSessions(claudeHome, projectPath) {
