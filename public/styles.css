@@ -3591,6 +3591,11 @@ button { cursor: pointer; }
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
+/* The element's own `display: flex` above otherwise beats the browser's
+   default `[hidden] { display: none }` - author CSS always wins over the
+   UA stylesheet regardless of specificity, so the attribute needs its own
+   rule here (see .menu-panel[hidden] etc. for the same idiom). */
+.copy-text-panel[hidden] { display: none; }
 @media (min-width: 721px) {
   /* 8px is the bar's existing spacing from the edge (.panel-overlay { top:
      8px }) - the same calculation as for .files-panel further up, so both
