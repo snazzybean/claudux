@@ -26,6 +26,7 @@ import { createAccessGate, hasValidSession } from './lib/accessGate.js';
 import { accessPublicRouter, accessProtectedRouter } from './routes/access.js';
 import { startReaperInterval } from './lib/reaper.js';
 import { startStatusWatcherInterval } from './lib/statusWatcher.js';
+import { startSubagentWatcherInterval } from './lib/subagentWatcher.js';
 import { claudeUpdateRouter } from './routes/claudeUpdate.js';
 import { startClaudeCodeUpdateInterval } from './lib/claudeCodeUpdateRun.js';
 
@@ -114,6 +115,7 @@ export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}
   const events = eventsRouter();
   app.use('/api/events', events.router);
   app.locals.publishStatus = events.publish;
+  app.locals.publishSubagents = (event) => events.publish(event, 'subagents');
   app.use('/api/presence', presenceRouter());
   app.use('/api/accounts', accountsRouter(config));
   app.use('/api/uploads', uploadsRouter());
@@ -175,6 +177,9 @@ export function startServer(config = loadConfig()) {
   const stopStatusWatcher = startStatusWatcherInterval(config, {
     onEvents: (list) => list.forEach((event) => app.locals.publishStatus(event)),
   });
+  const stopSubagentWatcher = startSubagentWatcherInterval(config, {
+    onEvents: (list) => list.forEach(app.locals.publishSubagents),
+  });
   const server = app.listen(config.port, config.host, () => {
     console.log(`Claudux is running on ${config.host}:${config.port}`);
   });
@@ -193,6 +198,7 @@ export function startServer(config = loadConfig()) {
   async function shutdown() {
     stopReaper();
     stopStatusWatcher();
+    stopSubagentWatcher();
     claudeCodeUpdate.stop();
     await new Promise((resolve) => {
       if (!ttydChild || ttydChild.exitCode !== null || ttydChild.signalCode !== null) {
