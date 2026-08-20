@@ -20,6 +20,13 @@ resolves it from the npx cache (`/root/.npm/_npx/*/node_modules/playwright`).
 Where that is missing, install it in a scratch directory first; nothing in
 `npm test` depends on any of this.
 
+`orderings.mjs` needs no browser at all: `agentLayout.js` touches no DOM, so
+the routes can be assembled in node and their crossings counted. That is how
+the two orderings the shape depends on were settled - by measuring a hundred
+combinations rather than by reasoning about them, twice wrongly.
+
+    node scripts/probe/orderings.mjs
+
 The fixture writes an isolated `CLAUDE_HOME` whose agents read as running,
 against a tmux session that really exists (the watcher skips dead ones), and
 a copy of the data directory. It never touches the real one.

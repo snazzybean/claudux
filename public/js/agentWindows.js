@@ -146,12 +146,8 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       const placed = entries.filter((entry) => entry.box);
       if (!anchor || placed.length === 0) continue;
       const byBox = new Map(placed.map((entry) => [entry.box, entry.agentId]));
-      for (const route of routesFor(placed.map((entry) => entry.box), anchor)) {
-        routes.push({
-          agentId: byBox.get(route.box),
-          entry: route.entry,
-          lane: { ...route.lane, fromX: anchor.x, fromY: anchor.y },
-        });
+      for (const route of routesFor(placed.map((entry) => entry.box), anchor, viewport())) {
+        routes.push({ agentId: byBox.get(route.box), points: route.points });
       }
     }
     lines.draw(routes);
@@ -257,6 +253,9 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     const entry = open.get(agentId);
     if (!entry) return;
     if (dismiss) dismissed.add(agentId);
+    // The connection closes visibly rather than the line just stopping being
+    // drawn: it pulls back towards the row while the window retracts.
+    lines.retract(agentId);
     const anchor = anchorOf(entry.sessionId);
     open.delete(agentId);
     const done = () => {
@@ -281,6 +280,9 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   function markDone(entry) {
     if (entry.closing) return;
     entry.closing = true;
+    // The end reaching this agent, shown as it happens: a pulse out along the
+    // line, and then the line itself pulls back when the window goes.
+    lines.pulse(entry.agentId, 'toAgent');
     entry.el.classList.add('agent-window-done');
     const title = entry.el.querySelector('.agent-window-title');
     title.textContent = `${title.textContent} · finished`;

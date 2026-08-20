@@ -1,125 +1,157 @@
 // public/js/agentLayout.js
 //
-// Where the agent windows go, and where a line reaches each one. Pure
+// Where the agent windows go, and which way a line reaches each one. Pure
 // arithmetic on rectangles - it touches no DOM and knows nothing about
-// windows, which is what makes the shape checkable by importing it in node
-// and counting the crossings rather than squinting at a screenshot.
+// windows, which is what makes the shape checkable by importing it in node,
+// and is how the crossings below were counted rather than guessed at.
 //
-// Every window gets its OWN line from the row, and the lines run as an
-// ordered bundle: each one swings into a lane of its own, runs along it, and
-// turns into its window. That ordering is what keeps them apart, and it is
-// the established answer for a fan-out of edges from one point (edge
-// bundling with ordered lanes) rather than something invented here.
+// Windows fill rows from the TOP of the screen, so the set always starts in
+// the same place instead of wherever its sidebar row happens to sit.
 //
-// The rule that carries it: the window that turns off FIRST takes the lane
-// closest to the windows. A line only crosses lanes while turning, and those
-// lanes belong to windows further along, which have not turned yet. Reversed,
-// it measures as three crossings out of three windows.
+// A route is a list of waypoints, not a curve: out of the row into a corridor
+// lane of its own, along that corridor to its row's band, along the band, and
+// then into the window's near edge. agentLines.js rounds the corners. Two
+// orderings keep the lines apart, and both are easy to break by accident:
 //
-// Two shapes were tried before and are worth not repeating. An arc with the
-// nearest edge picked per window mixes the arrival sides and crosses. And one
-// shared trunk with short stubs hanging off it is crossing-free but reads as
-// a single cable with taps rather than as a connection per agent.
+//   * in the CORRIDOR, the line that turns off first takes the OUTERMOST
+//     lane - anything still travelling is then to its left and cannot be
+//     crossed,
+//   * in a BAND, the window that is reached first takes the lane closest to
+//     the windows - a line only crosses lanes while turning in, and those
+//     belong to windows further along, which have not turned yet.
 
-const WINDOW_WIDTH = 300;
+const WINDOW_WIDTH = 320;
 const MIN_HEIGHT = 150;
 const MAX_HEIGHT = 300;
 const GAP = 12;
-// Clear of the row's edge, so the bundle is not on top of the sidebar.
-const CORRIDOR = 96;
-// Between the bundle's outermost lane and the edge of a window: the room the
-// turn needs.
-const CLEARANCE = 30;
-// Distance between two lanes of the bundle.
-const LANE = 11;
-// How far in from a window's leading corner its line meets it. Off-centre, so
-// the line reads as hanging off the window rather than balancing it.
-const ENTRY_INSET = 46;
-// Where the bundle turns off the row: far enough out that the swing into a
-// lane is a curve rather than a kink.
-const LANE_ENTRY = 56;
-// How far before its window a line leaves its lane to turn in.
-const TURN_LEAD = 40;
-
-// The bundle needs room between the row and the windows: one lane per window
-// on that side, plus the clearance the turn takes.
-function bundleDepth(count) {
-  return CLEARANCE + count * LANE;
-}
+// Where the corridor starts, clear of the row's edge.
+const CORRIDOR = 60;
+// Between a row of windows and its band, and between two lanes.
+const CLEARANCE = 26;
+const LANE = 12;
+// How far in from a window's leading corner its line meets it.
+const ENTRY_INSET = 48;
+// How far before the window the line leaves its band, so the turn has room
+// to be a curve rather than a corner.
+const TURN_LEAD = 34;
+// Vertical distance between two lines where they leave the row. Without it
+// they all start on the same point and run as one stroke for the first
+// stretch, which is exactly the "single cable" look this is not supposed to
+// be - and it is also what let them cross each other while peeling off.
+const START_SPREAD = 9;
 
 function gridFor(anchor, viewport, count) {
-  const left = anchor.x + CORRIDOR;
-  const columns = Math.max(1, Math.floor((viewport.width - left) / (WINDOW_WIDTH + GAP)));
-  const depth = bundleDepth(Math.min(count, columns));
-  const above = anchor.y - GAP - depth;
-  const below = viewport.height - GAP - anchor.y - depth;
-  const twoRows = count > columns;
-  const room = twoRows ? Math.min(above, below) : Math.max(above, below);
-  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, room));
-  return { left, columns, twoRows, height, depth, aboveIsRoomier: above >= below };
+  const columns = Math.max(1, Math.floor((viewport.width - anchor.x - CORRIDOR - GAP) / (WINDOW_WIDTH + GAP)));
+  const rows = Math.max(1, Math.ceil(count / columns));
+  const perRow = Math.min(count, columns);
+  // Every row needs its band underneath it, and the band is as deep as the
+  // number of lanes it carries.
+  const band = CLEARANCE + perRow * LANE;
+  const height = Math.min(MAX_HEIGHT, Math.max(
+    MIN_HEIGHT,
+    Math.floor((viewport.height - 2 * GAP - rows * band) / rows),
+  ));
+  // The corridor carries one lane per LINE, not one per column - reserving
+  // only the latter let it reach into the windows, and two lines ran straight
+  // through one.
+  return { columns, rows, band, height, left: anchor.x + CORRIDOR + LANE * count + CLEARANCE };
 }
 
-// How many windows fit before a second row would have nowhere to go.
+// How many windows fit before a row would be shorter than it is worth.
 export function layoutCapacity(anchor, viewport, limit) {
-  const { columns, height, depth } = gridFor(anchor, viewport, limit);
-  const above = anchor.y - GAP - depth >= height;
-  const below = viewport.height - GAP - anchor.y - depth >= height;
-  return Math.max(1, Math.min(limit, columns * ((above ? 1 : 0) + (below ? 1 : 0) || 1)));
+  const { columns, band } = gridFor(anchor, viewport, limit);
+  const rows = Math.max(1, Math.floor((viewport.height - 2 * GAP) / (MIN_HEIGHT + band)));
+  return Math.max(1, Math.min(limit, columns * rows));
 }
 
-// One box per agent id, in the order given: the first row fills up, the rest
-// go below the trunk.
+// One box per agent id, in the order given: rows fill left to right from the
+// top of the screen down.
 export function layoutFor(agentIds, anchor, viewport) {
-  const { left, columns, twoRows, height, depth, aboveIsRoomier } = gridFor(anchor, viewport, agentIds.length);
-  const firstRowAbove = twoRows ? true : aboveIsRoomier;
-  return agentIds.map((agentId, index) => {
-    const column = index % columns;
-    const isAbove = Math.floor(index / columns) === 0 ? firstRowAbove : !firstRowAbove;
-    return {
-      agentId,
-      box: {
-        x: left + column * (WINDOW_WIDTH + GAP),
-        y: isAbove ? anchor.y - depth - height : anchor.y + depth,
-        width: WINDOW_WIDTH,
-        height,
-      },
-    };
-  });
+  const { columns, band, height, left } = gridFor(anchor, viewport, agentIds.length);
+  return agentIds.map((agentId, index) => ({
+    agentId,
+    box: {
+      x: left + (index % columns) * (WINDOW_WIDTH + GAP),
+      y: GAP + Math.floor(index / columns) * (height + band),
+      width: WINDOW_WIDTH,
+      height,
+    },
+  }));
 }
 
-// One route per window, as an ordered bundle: swing out of the row into a
-// lane of this window's own, run along it, turn into the window.
+// The waypoints for every box, read from the boxes as they are right now
+// rather than from the layout - so a window dragged anywhere takes its line
+// along with it.
 //
-// Read from the boxes as they are right now rather than from the layout, so a
-// window dragged anywhere - including across to the other side of the row,
-// where it is met on its other edge - takes its line along with it. The lane
-// order is decided here too, per side and by how far along the window sits:
-// the one that turns off first gets the lane nearest the windows, so a turn
-// never crosses a lane that is still in use.
-export function routesFor(boxes, anchor) {
-  const sides = { above: [], below: [] };
+// The band belongs to a ROW, not to a window: which edge a line arrives on is
+// decided by where there is room for the band, and every window in that row is
+// entered the same way. Deciding it per window against the session row's own
+// height put the band above a row that starts at the top of the screen, which
+// is off the screen.
+export function routesFor(boxes, anchor, viewport) {
+  const rows = new Map();
   for (const box of boxes) {
-    const above = box.y + box.height / 2 < anchor.y;
-    const entry = {
-      x: box.x + Math.min(ENTRY_INSET, box.width / 2),
-      y: above ? box.y + box.height : box.y,
-    };
-    sides[above ? 'above' : 'below'].push({ box, entry, above });
+    const key = `${Math.round(box.y)}x${Math.round(box.height)}`;
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key).push(box);
   }
-  const routes = [];
-  for (const side of ['above', 'below']) {
-    const members = sides[side].sort((a, b) => a.entry.x - b.entry.x);
-    members.forEach(({ box, entry, above }, rank) => {
-      const dir = above ? -1 : 1;
-      const laneY = anchor.y + dir * (CLEARANCE + (members.length - rank) * LANE);
-      routes.push({
+
+  const legs = [];
+  for (const members of rows.values()) {
+    members.sort((a, b) => a.x - b.x);
+    const [first] = members;
+    const need = CLEARANCE + members.length * LANE;
+    const below = first.y + first.height + need <= viewport.height - GAP;
+    const outward = below ? 1 : -1;
+    const bandBase = below ? first.y + first.height + CLEARANCE : first.y - CLEARANCE;
+    members.forEach((box, rank) => {
+      legs.push({
         box,
-        entry,
-        lane: { entryX: anchor.x + LANE_ENTRY, y: laneY, turnX: entry.x - TURN_LEAD },
+        entry: {
+          x: box.x + Math.min(ENTRY_INSET, box.width / 2),
+          y: below ? box.y + box.height : box.y,
+        },
+        // The window reached first takes the lane closest to the windows: a
+        // line only crosses lanes while turning in, and those belong to
+        // windows further along, which have not turned yet.
+        laneY: bandBase + outward * rank * LANE,
       });
     });
   }
-  return routes;
+
+  // Two orderings, and the pair of them is what leaves no crossings at all.
+  // Measured over a hundred combinations of screen, row position and window
+  // count: this pair scores zero, while every other pairing of the same two
+  // rules scores between 333 and 502.
+  //
+  // Where they leave the row, top to bottom in the order of their lanes.
+  const byLane = [...legs].sort((a, b) => a.laneY - b.laneY);
+  byLane.forEach((leg, rank) => {
+    leg.startY = anchor.y + (rank - (byLane.length - 1) / 2) * START_SPREAD;
+  });
+  // And in the corridor, the line whose lane is NEAREST the row takes the
+  // outermost position: it turns off first, and everything still travelling
+  // is then to its left, where it cannot be crossed.
+  const byNearest = [...legs].sort((a, b) => Math.abs(b.laneY - anchor.y) - Math.abs(a.laneY - anchor.y));
+  byNearest.forEach((leg, rank) => {
+    leg.corridorX = anchor.x + CORRIDOR + rank * LANE;
+  });
+
+  return legs.map(({ box, entry, laneY, corridorX, startY }) => ({
+    box,
+    entry,
+    // Duplicate and near-collinear points are dropped by the renderer, so a
+    // line whose lane happens to sit level with the row simply comes out
+    // straighter.
+    points: [
+      { x: anchor.x, y: startY },
+      { x: corridorX, y: startY },
+      { x: corridorX, y: laneY },
+      { x: entry.x - TURN_LEAD, y: laneY },
+      { x: entry.x, y: laneY },
+      entry,
+    ],
+  }));
 }
 
 // Kept on screen: after a resize, or after being dragged past an edge.
