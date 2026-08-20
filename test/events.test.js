@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { eventsRouter } from '../src/routes/events.js';
 import express from 'express';
+import { createApp } from '../src/server.js';
+import { tmpConfig } from './helpers/routeHarness.js';
 
 // Minimal SSE client: connects, collects raw chunks, disconnects.
 async function collectFirstEvent(port, publishFn) {
@@ -47,6 +49,30 @@ test('publish carries a given event type through', async () => {
   try {
     const raw = await collectFirstEvent(port, () => publish({ tmuxSession: 'a', agents: [] }, 'subagents'));
     assert.match(raw, /event: subagents\ndata: \{"tmuxSession":"a","agents":\[\]\}/);
+  } finally {
+    server.close();
+  }
+});
+
+// Through createApp(), not eventsRouter() alone: compression() sits ahead of
+// /api/events in the real middleware chain, and a request that falls through
+// past the static-asset middlewares still carries its patched res.write - a
+// browser's EventSource always sends Accept-Encoding, unlike the plain HTTP
+// client above, so this is the case that actually broke in production
+// (gzip buffers writes waiting for its window to fill, and a stream that
+// lives on small, infrequent chunks never fills it - the connection sat in
+// CONNECTING forever, never even reaching 'open').
+test('the real app does not gzip the SSE stream', async () => {
+  const app = createApp(tmpConfig());
+  const server = app.listen(0);
+  const { port } = server.address();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/events`, {
+      headers: { 'Accept-Encoding': 'gzip' },
+    });
+    assert.equal(res.headers.get('content-encoding'), null);
+    assert.equal(res.headers.get('content-type'), 'text/event-stream');
+    await res.body.cancel();
   } finally {
     server.close();
   }

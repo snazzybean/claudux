@@ -59,8 +59,21 @@ export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}
   // Order matters: compression wraps whatever the two below write, and
   // minifyStatic has to see the request before express.static answers it.
   // index.html only has its comments stripped, no more (see staticAssets.js).
+  //
+  // The filter exempts SSE: gzip buffers writes waiting for its window to
+  // fill, which is fine for a whole file but starves a stream that lives on
+  // small, infrequent chunks - the browser's EventSource never saw the
+  // first byte and sat in CONNECTING forever. compression() has no path
+  // scope of its own once mounted (a request that falls through the two
+  // middlewares below still carries its patched res.write), so every
+  // streaming response needs this same exemption, not just this one route.
   const publicDir = path.join(import.meta.dirname, '../public');
-  app.use(compression());
+  app.use(compression({
+    filter: (req, res) => {
+      if (res.getHeader('Content-Type') === 'text/event-stream') return false;
+      return compression.filter(req, res);
+    },
+  }));
   app.use(minifyStatic(publicDir));
   app.use(express.static(publicDir));
 
