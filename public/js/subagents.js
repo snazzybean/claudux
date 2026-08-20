@@ -199,3 +199,59 @@ export function initSubagents({
 
   return { handleEvent, sessionOpened, close, refreshBadges };
 }
+
+// ---------- Diagnostic overlay for the stream itself ----------
+//
+// Enabled with `?debug=subagents`. An empty orbit has three very different
+// causes that look identical on screen - nothing running, nothing arriving,
+// or something arriving for a session that is not the open one - and this
+// tells them apart: what the connection is doing, what came in, for which
+// session, and how many nodes the orbit actually holds as a result. Written
+// after an empty orbit was chased through the backend twice while the
+// backend was fine both times.
+const DEBUG_TICK_MS = 250;
+const DEBUG_HISTORY_LENGTH = 4;
+
+const READY_STATE_NAMES = ['CONNECTING', 'OPEN', 'CLOSED'];
+
+export function startSubagentDebug({ source, orbitEl, activeSessionId }) {
+  const box = document.createElement('div');
+  box.className = 'debug-overlay debug-overlay-bottom';
+  document.body.appendChild(box);
+
+  const counts = { status: 0, subagents: 0 };
+  let lastAt = null;
+  const history = [];
+
+  for (const type of ['status', 'subagents']) {
+    source.addEventListener(type, (event) => {
+      counts[type] += 1;
+      lastAt = Date.now();
+      if (type !== 'subagents') return;
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        history.push('unparsable payload');
+        return;
+      }
+      const agents = (payload.agents ?? []).map((a) => `${a.agentId.slice(0, 10)}/${a.status}/${a.currentTool?.name ?? '-'}`);
+      history.push(`${(payload.sessionId ?? '?').slice(0, 8)} ${agents.join(' ') || '(none)'}`);
+      if (history.length > DEBUG_HISTORY_LENGTH) history.shift();
+    });
+  }
+
+  setInterval(() => {
+    const open = activeSessionId();
+    box.textContent = [
+      `stream        ${READY_STATE_NAMES[source.readyState] ?? source.readyState}`,
+      `events        ${counts.subagents}x subagents, ${counts.status}x status`,
+      `last event    ${lastAt === null ? 'none yet' : `${((Date.now() - lastAt) / 1000).toFixed(1)}s ago`}`,
+      `open session  ${open ? String(open).slice(0, 8) : 'none open'}`,
+      // The orbit is drawn from `known`, so a node count of 0 next to a
+      // non-zero event count puts the fault on this side of the wire.
+      `orbit nodes   ${orbitEl.querySelectorAll('.subagent-node').length}${orbitEl.hidden ? ' (orbit hidden)' : ''}`,
+      `received      ${history.join('\n              ') || '-'}`,
+    ].join('\n');
+  }, DEBUG_TICK_MS);
+}

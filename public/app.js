@@ -41,7 +41,7 @@ import {
   setStuckTerminalRecovery,
 } from './js/terminal.js';
 import { initUsage } from './js/usage.js';
-import { initSubagents } from './js/subagents.js';
+import { initSubagents, startSubagentDebug } from './js/subagents.js';
 import { showFiles, leaveFiles } from './js/files.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
@@ -376,12 +376,18 @@ const subagents = initSubagents({
   activeSessionId: () => openSessionId(currentProject?.sessions ?? []),
 });
 
-startEventStream(
+const activeSessionIdForDebug = () => openSessionId(currentProject?.sessions ?? []);
+
+const eventSource = startEventStream(
   ({ tmuxSession, sessionId, state }) => {
     applyActivityState(tmuxSession, sessionId, state);
   },
   (payload) => subagents.handleEvent(payload),
 );
+
+if (new URLSearchParams(location.search).get('debug') === 'subagents') {
+  startSubagentDebug({ source: eventSource, orbitEl: subagentOrbitEl, activeSessionId: activeSessionIdForDebug });
+}
 
 async function refreshProjectSessions(project) {
   try {

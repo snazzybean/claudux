@@ -71,7 +71,7 @@ const DEBUG_HISTORY_LENGTH = 3;
 
 function showViewportMeasurement() {
   const box = document.createElement('div');
-  box.className = 'viewport-debug';
+  box.className = 'debug-overlay debug-overlay-top';
   document.body.appendChild(box);
   const keybar = document.getElementById('keybar');
 

@@ -2797,9 +2797,8 @@ button { cursor: pointer; }
 /* Measurement readout from app.js, only with `?debug=viewport` in the
    document. It sits above everything and intercepts nothing - whatever it
    covers stays usable. */
-.viewport-debug {
+.debug-overlay {
   position: fixed;
-  top: 0;
   left: 0;
   z-index: 9999;
   padding: 6px 8px;
@@ -2811,6 +2810,8 @@ button { cursor: pointer; }
   background: rgba(0, 0, 0, 0.82);
   pointer-events: none;
 }
+.debug-overlay-top { top: 0; }
+.debug-overlay-bottom { bottom: 0; }
 
 /* Waypoint for focus during copy and paste (see terminal.js). Deliberately
    NOT display:none or visibility:hidden - both take away an element's
