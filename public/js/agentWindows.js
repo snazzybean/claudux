@@ -30,8 +30,13 @@ const GAP = 12;
 // puts every window the same distance away in the same direction, and the
 // curves that are the point of the thing then run through the windows in
 // front. On an arc each one has its own direction out of the edge.
-const MIN_ARC_RADIUS = 140;
+const MIN_ARC_RADIUS = 220;
 const MAX_ARC_RADIUS = 460;
+// Half the opening of the fan. The windows are placed by angle, not by
+// screen height: spreading them over the height instead put the outer ones
+// further from the row than the radius, where the arc collapses and they
+// end up back against the sidebar - scattered rather than curved.
+const ARC_HALF_DEGREES = 62;
 // A little irregularity per agent, so an arc reads as one rather than as a
 // mechanism. Derived from the agent's id, not drawn at random: a window
 // must not jump on every re-layout.
@@ -149,50 +154,52 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   // Their height comes first, because it is what decides how much vertical
   // room is left to fan them out in - a screen full of tall windows has no
   // arc, only a column.
-  function arcFor(sessionId, count) {
+  function arcFor(sessionId) {
     const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
     const usable = window.innerHeight - 2 * GAP;
-    // Two windows' worth of vertical room at most, so there is always
-    // somewhere for the next one to sit.
+    // At most half the screen, so there is always vertical room for the
+    // next window on the arc rather than one tall one filling it.
     const height = Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, Math.floor(usable / 2.2)));
-    const top = GAP + height / 2;
-    const bottom = window.innerHeight - GAP - height / 2;
-    return {
-      anchor,
-      height,
-      top,
-      span: Math.max(0, bottom - top),
-      radius: Math.max(MIN_ARC_RADIUS, Math.min(MAX_ARC_RADIUS, window.innerWidth - anchor.x - WINDOW_WIDTH - GAP)),
-      count,
-    };
+    const radius = Math.max(MIN_ARC_RADIUS, Math.min(MAX_ARC_RADIUS, window.innerWidth - anchor.x - WINDOW_WIDTH - GAP));
+    return { anchor, height, radius };
   }
 
-  // How many windows this screen can fan out before their title bars start
-  // covering each other.
+  // How many windows fit on the arc before their title bars start covering
+  // each other - bounded by the arc's own height and by the screen's.
   function capacityFor(sessionId) {
     if (narrow()) return MAX_WINDOWS;
-    const arc = arcFor(sessionId, MAX_WINDOWS);
-    return Math.max(1, Math.min(MAX_WINDOWS, Math.floor(arc.span / ARC_MIN_SEPARATION) + 1));
+    const arc = arcFor(sessionId);
+    const arcExtent = 2 * arc.radius * Math.sin((ARC_HALF_DEGREES * Math.PI) / 180);
+    const roomOnScreen = window.innerHeight - arc.height - 2 * GAP;
+    const extent = Math.min(arcExtent, Math.max(0, roomOnScreen));
+    return Math.max(1, Math.min(MAX_WINDOWS, Math.floor(extent / ARC_MIN_SEPARATION) + 1));
   }
 
   function layout(sessionId) {
     if (narrow()) return;
     const mine = [...open.values()].filter((entry) => entry.sessionId === sessionId && !entry.moved);
     if (mine.length === 0) return;
-    const arc = arcFor(sessionId, mine.length);
+    const arc = arcFor(sessionId);
+    const half = (ARC_HALF_DEGREES * Math.PI) / 180;
+    // The fan opens into the room that is actually there. A row near the
+    // top of the sidebar has little space above it and plenty below, and a
+    // symmetric fan would be limited by the smaller side on both - the
+    // windows clamped against the screen edge, and the arc flat again.
+    const reach = (room) => Math.asin(Math.min(1, Math.max(0, room / arc.radius)));
+    const above = arc.anchor.y - arc.height / 2 - GAP;
+    const below = window.innerHeight - GAP - arc.height / 2 - arc.anchor.y;
+    const from = -Math.min(half, reach(above));
+    const to = Math.min(half, reach(below));
     mine.forEach((entry, index) => {
-      // Evenly over the vertical room, then out to the arc: a window level
-      // with the edge sits furthest away, one above or below comes back in.
-      // That is what makes the set read as a half circle around the row
-      // rather than as a row of its own.
+      // By angle around the edge, so the set is a fan whatever the screen
+      // is shaped like: the window level with the row sits furthest out,
+      // the ones above and below swing back in towards it.
       const t = mine.length === 1 ? 0.5 : index / (mine.length - 1);
-      const centerY = arc.top + t * arc.span;
+      const angle = from + t * (to - from);
       const jitter = jitterOf(entry.agentId);
       const radius = Math.max(MIN_ARC_RADIUS, arc.radius + jitter.radius);
-      const dy = centerY - arc.anchor.y;
-      const dx = Math.max(MIN_ARC_RADIUS / 2, Math.sqrt(Math.max(0, radius * radius - dy * dy)));
-      entry.x = arc.anchor.x + dx;
-      entry.y = centerY - arc.height / 2 + jitter.y;
+      entry.x = arc.anchor.x + radius * Math.cos(angle);
+      entry.y = arc.anchor.y + radius * Math.sin(angle) - arc.height / 2 + jitter.y;
       entry.el.style.width = `${WINDOW_WIDTH}px`;
       entry.el.style.height = `${arc.height}px`;
       place(entry, WINDOW_WIDTH);

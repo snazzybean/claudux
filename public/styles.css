@@ -2084,19 +2084,20 @@ button { cursor: pointer; }
 .agent-line {
   fill: none;
   stroke: var(--live);
-  stroke-width: 1.5;
-  opacity: 0.4;
-  stroke-dasharray: 5 11;
-  filter: drop-shadow(0 0 4px var(--live));
-  animation: agent-line-flow 1.6s linear infinite;
+  stroke-width: 2.5;
+  opacity: 0.85;
+  stroke-linecap: round;
+  stroke-dasharray: 7 10;
+  filter: drop-shadow(0 0 7px var(--live));
+  animation: agent-line-flow 1.4s linear infinite;
 }
 @keyframes agent-line-flow {
-  from { stroke-dashoffset: 16; }
+  from { stroke-dashoffset: 17; }
   to { stroke-dashoffset: 0; }
 }
 .agent-pulse {
   fill: var(--live);
-  filter: drop-shadow(0 0 6px var(--live));
+  filter: drop-shadow(0 0 10px var(--live));
 }
 @media (prefers-reduced-motion: reduce) {
   .agent-pulse { display: none; }
