@@ -7,11 +7,12 @@
 // then follows the stream, asking each time only for what was appended.
 //
 // This module owns the windows: which are open, what is in them, and how they
-// behave. Where they go is agentArc.js, what connects them is agentLines.js,
-// and how anything moves is motion.js - three things that were in here and
-// each grew a name of their own.
+// behave. Where they go and how a line reaches them is agentLayout.js, the
+// drawing of those lines is agentLines.js, and how anything moves is
+// motion.js - three things that were in here and each grew a name of their
+// own.
 import { svg } from './icons.js';
-import { arcPlacement, arcCapacity, clampBox } from './agentArc.js';
+import { layoutFor, layoutCapacity, clampBox } from './agentLayout.js';
 import { initAgentLines } from './agentLines.js';
 import { boxOf, flipFrom, springEasing, staggerDelay } from './motion.js';
 
@@ -119,16 +120,23 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       lines.clear();
       return;
     }
-    // Which side of a window a line meets is agentLines.js's decision, from
-    // the box and the anchor - it changes as soon as a window is dragged
-    // somewhere else, so there is nothing to keep in step here.
-    const connections = [];
+    const routes = [];
     for (const entry of open.values()) {
       const anchor = anchorOf(entry.sessionId);
-      if (!anchor || !entry.box) continue;
-      connections.push({ agentId: entry.agentId, anchor, box: entry.box });
+      if (!anchor || !entry.route) continue;
+      // A window that has been dragged keeps its route's strip but arrives
+      // where it now is, so the line follows it without leaving the corridor
+      // its neighbours use.
+      routes.push({
+        agentId: entry.agentId,
+        from: anchor,
+        corridor: entry.route.corridor,
+        entry: entry.moved
+          ? { x: entry.box.x + (entry.route.entry.x - entry.route.box.x), y: entry.box.y }
+          : entry.route.entry,
+      });
     }
-    lines.draw(connections);
+    lines.draw(routes);
   }
 
   // Re-places every window of a session that has not been moved by hand, and
@@ -140,9 +148,10 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     if (mine.length === 0) return;
     const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
     const before = animate ? mine.map((entry) => boxOf(entry.el)) : null;
-    const placed = arcPlacement(mine.map((entry) => entry.agentId), anchor, viewport());
+    const placed = layoutFor(mine.map((entry) => entry.agentId), anchor, viewport());
     mine.forEach((entry, index) => {
-      applyBox(entry, clampBox(placed[index], viewport()));
+      entry.route = { ...placed[index].route, box: placed[index].box };
+      applyBox(entry, clampBox(placed[index].box, viewport()));
       if (before) flipFrom(entry.el, before[index], { durationMs: OPEN_MS, easing: spring });
     });
     drawLines();
@@ -188,7 +197,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     el.querySelector('.agent-window-title').textContent = [agent.agentType, agent.description].filter(Boolean).join(' · ');
     containerEl.appendChild(el);
 
-    const entry = { el, agentId: agent.agentId, sessionId, offset: 0, box: null, moved: false, closing: false };
+    const entry = { el, agentId: agent.agentId, sessionId, offset: 0, box: null, route: null, moved: false, closing: false };
     open.set(agent.agentId, entry);
 
     if (anchorOf(sessionId) && !narrow()) {
@@ -244,7 +253,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   function capacityFor(sessionId) {
     if (narrow()) return MAX_WINDOWS;
     const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
-    return arcCapacity(anchor, viewport(), MAX_WINDOWS);
+    return layoutCapacity(anchor, viewport(), MAX_WINDOWS);
   }
 
   function toggle(sessionId, agents) {
