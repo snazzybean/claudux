@@ -44,6 +44,11 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     const edge = document.querySelector(`.session-agents-edge[data-session-id="${sessionId}"]`);
     if (!edge) return null;
     const rect = edge.getBoundingClientRect();
+    // A hidden edge is still found by querySelector and reports a rect of
+    // zeroes - which would send the curve to the top left corner exactly
+    // when the count drops and the edge disappears, while the finished
+    // window is still on screen.
+    if (rect.width === 0 && rect.height === 0) return null;
     return { x: rect.right, y: rect.top + rect.height / 2 };
   }
 
@@ -275,7 +280,10 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   // rebuild, since no stream event reports a session's disappearance.
   function pruneMissingRows() {
     for (const [agentId, entry] of [...open]) {
-      if (!anchorOf(entry.sessionId)) closeWindow(agentId);
+      // The row, not its edge: the edge hides as soon as the count drops to
+      // zero, and a finished window still has its few seconds to show that
+      // it finished.
+      if (!document.querySelector(`.session-row[data-session-id="${entry.sessionId}"]`)) closeWindow(agentId);
     }
   }
 
