@@ -88,7 +88,26 @@ export function initSubagents({
       node.setAttribute('r', '4');
       node.setAttribute('cx', String(ORBIT_CENTER + r * Math.cos(angle)));
       node.setAttribute('cy', String(ORBIT_CENTER + r * Math.sin(angle)));
-      node.setAttribute('class', `subagent-node${agent.status === 'done' ? ' subagent-node-done' : ''}`);
+      // subagent-node-done isn't part of the class attribute set here: a
+      // CSS transition only animates a property change across two renders
+      // of an EXISTING element, so applying opacity:0 at creation time
+      // would leave the node invisible on its very first painted frame
+      // instead of fading. On the tick a node first turns 'done' (justDone)
+      // the class is added a frame later, after this element has already
+      // painted at its normal opacity, so the transition has something to
+      // animate from. A later re-render of the same still-fading node (an
+      // unrelated sibling event can trigger one before the 2s timeout below
+      // fires) adds the class immediately instead - it's already faded by
+      // then, and rAF-delaying it again would restart the transition from
+      // full opacity, same class of bug justPulsed already guards against.
+      node.setAttribute('class', 'subagent-node');
+      if (agent.status === 'done') {
+        if (agent.justDone) {
+          requestAnimationFrame(() => node.classList.add('subagent-node-done'));
+        } else {
+          node.classList.add('subagent-node-done');
+        }
+      }
       node.dataset.agentId = agent.agentId;
       node.tabIndex = 0;
       node.setAttribute('role', 'button');
@@ -133,6 +152,10 @@ export function initSubagents({
         // A pulse fires once, on the tick that reports it - never replayed
         // from a later renderOrbit() call for an unrelated reason.
         justPulsed: agent.status === 'active' && Boolean(previous),
+        // Same one-shot idiom for the fade-out trigger: true only on the
+        // tick a node's status first reports 'done', so renderOrbit knows
+        // to delay the -done class by a frame just this once (see there).
+        justDone: agent.status === 'done' && previous?.status !== 'done',
       });
       // A 'done' agent gets exactly one more render as 'done' (the fade-out
       // CSS transition), then is marked 'faded' so renderOrbit stops
