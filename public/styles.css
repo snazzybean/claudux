@@ -1987,12 +1987,14 @@ button { cursor: pointer; }
   z-index: 6;
   pointer-events: none;
 }
+/* Size and position both come from agentArc.js by way of inline styles -
+   the arc has to know the box to place it, so the stylesheet does not get a
+   second opinion on it. */
 .agent-window {
   position: fixed;
   display: flex;
   flex-direction: column;
-  width: 360px;
-  max-height: 34vh;
+  transform-origin: left center;
   pointer-events: auto;
   overflow: hidden;
   border-radius: var(--r-md);
@@ -2081,24 +2083,24 @@ button { cursor: pointer; }
 /* A dash pattern travelling along the stroke: the connection itself reads
    as carrying something, without a second element per line. The bright dot
    on top of it (.agent-pulse) still marks a real event. */
+/* The glow is an SVG filter on the group (see agentLines.js), not a
+   drop-shadow per path: a drop shadow is one offset copy and reads as a thin
+   line with a haze around it, while a blurred copy of the stroke merged
+   under the sharp one reads as light. */
 .agent-line {
   fill: none;
   stroke: var(--live);
-  stroke-width: 2.5;
-  opacity: 0.85;
+  stroke-width: 2;
+  opacity: 0.9;
   stroke-linecap: round;
   stroke-dasharray: 7 10;
-  filter: drop-shadow(0 0 7px var(--live));
   animation: agent-line-flow 1.4s linear infinite;
 }
 @keyframes agent-line-flow {
   from { stroke-dashoffset: 17; }
   to { stroke-dashoffset: 0; }
 }
-.agent-pulse {
-  fill: var(--live);
-  filter: drop-shadow(0 0 10px var(--live));
-}
+.agent-pulse { fill: var(--live); }
 @media (prefers-reduced-motion: reduce) {
   .agent-pulse { display: none; }
   .agent-line { animation: none; stroke-dasharray: none; }

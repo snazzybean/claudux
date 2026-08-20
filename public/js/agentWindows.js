@@ -1,76 +1,59 @@
 // public/js/agentWindows.js
 //
-// A window per running subagent, popped out of its session's glowing row
-// edge, showing that agent's own conversation. What is inside comes from
+// A window per running subagent, thrown out of its session's glowing row edge
+// and showing that agent's own conversation. What is inside comes from
 // GET /api/sessions/:id/agents/:agentId - the SSE stream carries only the
 // current tool, never the history, so a window fetches its blocks once and
-// then follows the stream, asking each time only for what was appended
-// since.
+// then follows the stream, asking each time only for what was appended.
 //
-// Positions live here and only here, in memory: a window put somewhere by
-// hand stays there for as long as the page lives, and a reload starts the
-// cascade over. Persisting them would keep a state across sessions that
-// helps nobody.
+// This module owns the windows: which are open, what is in them, and how they
+// behave. Where they go is agentArc.js, what connects them is agentLines.js,
+// and how anything moves is motion.js - three things that were in here and
+// each grew a name of their own.
 import { svg } from './icons.js';
+import { arcPlacement, arcCapacity, clampBox } from './agentArc.js';
+import { initAgentLines } from './agentLines.js';
+import { boxOf, flipFrom, springEasing, staggerDelay } from './motion.js';
 
-// Six at once. Beyond that the terminal disappears behind windows - one
-// session in this project's own history had 46 agents in its directory.
-// The upper bound; how many actually fit is decided by the screen (see
-// gridFor). One session in this project's own history had 46 agents in its
-// directory.
+// The upper bound; how many actually fit is the screen's business (see
+// arcCapacity). One session in this project's own history had 46 agents in
+// its directory.
 const MAX_WINDOWS = 6;
-const WINDOW_WIDTH = 360;
-// Below this a window shows a title bar and barely two lines, which is not
-// worth a tile. Above the upper bound a single row would run the full height
-// of the screen for a conversation that is a few lines long.
-const MIN_WINDOW_HEIGHT = 180;
-const MAX_WINDOW_HEIGHT = 420;
-const GAP = 12;
-// Windows sit on an arc around the row's edge rather than in a grid: a grid
-// puts every window the same distance away in the same direction, and the
-// curves that are the point of the thing then run through the windows in
-// front. On an arc each one has its own direction out of the edge.
-const MIN_ARC_RADIUS = 220;
-const MAX_ARC_RADIUS = 460;
-// Half the opening of the fan. The windows are placed by angle, not by
-// screen height: spreading them over the height instead put the outer ones
-// further from the row than the radius, where the arc collapses and they
-// end up back against the sidebar - scattered rather than curved.
-const ARC_HALF_DEGREES = 62;
-// A little irregularity per agent, so an arc reads as one rather than as a
-// mechanism. Derived from the agent's id, not drawn at random: a window
-// must not jump on every re-layout.
-const JITTER_RADIUS = 34;
-const JITTER_Y = 18;
-// Enough vertical distance between two windows on the arc that both title
-// bars stay readable.
-const ARC_MIN_SEPARATION = 96;
-// A finished agent's window stays long enough to see that it finished, and
-// to take in its last lines, then retracts by itself. Leaving it would fill
-// the screen with windows that nothing is happening in any more.
+// A finished agent's window stays long enough to see that it finished and to
+// take in its last lines, then retracts by itself.
 const CLOSE_AFTER_DONE_MS = 4000;
-// Below this the sidebar is collapsed, so there is no edge for a line to
-// reach and no room to place a window by hand - they stack instead. Same
-// breakpoint every other narrow rule in styles.css uses.
+// Below this the sidebar is collapsed, so there is no edge to hang off and no
+// room to place a window by hand - they stack instead. Same breakpoint every
+// other narrow rule in styles.css uses.
 const NARROW_PX = 720;
+const OPEN_MS = 420;
+const CLOSE_MS = 220;
 
 export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
-  // agentId -> { el, sessionId, offset, x, y }
+  const lines = initAgentLines(lineEl);
+  // agentId -> { el, agentId, sessionId, offset, box, moved, closing }
   const open = new Map();
+  const spring = springEasing();
 
   const narrow = () => window.innerWidth <= NARROW_PX;
+  const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
 
   function anchorOf(sessionId) {
     const edge = document.querySelector(`.session-agents-edge[data-session-id="${sessionId}"]`);
     if (!edge) return null;
     const rect = edge.getBoundingClientRect();
     // A hidden edge is still found by querySelector and reports a rect of
-    // zeroes - which would send the curve to the top left corner exactly
-    // when the count drops and the edge disappears, while the finished
-    // window is still on screen.
+    // zeroes, which would put the anchor in the top left corner exactly when
+    // the count drops and a finished window is still on screen.
     if (rect.width === 0 && rect.height === 0) return null;
     return { x: rect.right, y: rect.top + rect.height / 2 };
   }
+
+  function entriesOf(sessionId) {
+    return [...open.values()].filter((entry) => entry.sessionId === sessionId);
+  }
+
+  // ---------- what is inside ----------
 
   function blockEl(block) {
     const el = document.createElement('div');
@@ -82,8 +65,6 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       return el;
     }
     el.className = 'agent-block-tool';
-    // Call and result on separate lines. As siblings in one flex row the
-    // result became a third column and wrapped down the whole window.
     const call = document.createElement('div');
     call.className = 'agent-tool-call';
     const name = document.createElement('span');
@@ -103,8 +84,8 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     return el;
   }
 
-  async function loadInto(entry, agentId) {
-    const url = `/api/sessions/${encodeURIComponent(entry.sessionId)}/agents/${encodeURIComponent(agentId)}?after=${entry.offset}`;
+  async function loadInto(entry) {
+    const url = `/api/sessions/${encodeURIComponent(entry.sessionId)}/agents/${encodeURIComponent(entry.agentId)}?after=${entry.offset}`;
     let payload;
     try {
       payload = await (await fetch(url)).json();
@@ -118,92 +99,59 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     const body = entry.el.querySelector('.agent-window-body');
     const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
     for (const block of payload.blocks) body.appendChild(blockEl(block));
-    // Follow the tail only when the reader was already there - scrolling
-    // back to look at something must not be yanked away by an arriving
-    // block.
+    // Follow the tail only while the reader is already there - scrolling back
+    // to look at something must not be yanked away by an arriving block.
     if (atBottom) body.scrollTop = body.scrollHeight;
   }
 
-  function place(entry, width = entry.el.offsetWidth || WINDOW_WIDTH) {
+  // ---------- where they sit ----------
+
+  function applyBox(entry, box) {
+    entry.box = box;
+    entry.el.style.left = `${box.x}px`;
+    entry.el.style.top = `${box.y}px`;
+    entry.el.style.width = `${box.width}px`;
+    entry.el.style.height = `${box.height}px`;
+  }
+
+  function drawLines() {
+    if (narrow()) {
+      lines.clear();
+      return;
+    }
+    // Each window gets its own attach height, so several leaving the same
+    // edge fan apart instead of bundling into one stroke.
+    const fanned = new Map();
+    const connections = [];
+    for (const entry of open.values()) {
+      const anchor = anchorOf(entry.sessionId);
+      if (!anchor || !entry.box) continue;
+      const rank = fanned.get(entry.sessionId) ?? 0;
+      fanned.set(entry.sessionId, rank + 1);
+      connections.push({
+        agentId: entry.agentId,
+        from: anchor,
+        to: { x: entry.box.x, y: entry.box.y + 18 + rank * 12 },
+      });
+    }
+    lines.draw(connections);
+  }
+
+  // Re-places every window of a session that has not been moved by hand, and
+  // animates each one from where it was rather than letting it jump - the
+  // FLIP that makes a re-arrangement read as one movement.
+  function layout(sessionId, { animate = true } = {}) {
     if (narrow()) return;
-    // Clamped so a window cannot end up off screen - after a resize, or
-    // after being dragged past an edge.
-    const maxX = Math.max(0, window.innerWidth - width - GAP);
-    const maxY = Math.max(0, window.innerHeight - 80);
-    entry.x = Math.min(Math.max(entry.x, 0), maxX);
-    entry.y = Math.min(Math.max(entry.y, 0), maxY);
-    entry.el.style.left = `${entry.x}px`;
-    entry.el.style.top = `${entry.y}px`;
-    drawLines();
-  }
-
-  // A stable, id-derived wobble, so the arc looks like an arc of windows
-  // rather than of slots - and so a window does not jump every time
-  // something is re-laid out.
-  function jitterOf(agentId) {
-    let hash = 0;
-    for (let i = 0; i < agentId.length; i += 1) hash = (hash * 31 + agentId.charCodeAt(i)) | 0;
-    hash = Math.abs(hash);
-    return {
-      radius: (hash % (2 * JITTER_RADIUS)) - JITTER_RADIUS,
-      y: ((hash >> 8) % (2 * JITTER_Y)) - JITTER_Y,
-    };
-  }
-
-  // Windows on an arc to the right of the row's edge, one direction each.
-  // Their height comes first, because it is what decides how much vertical
-  // room is left to fan them out in - a screen full of tall windows has no
-  // arc, only a column.
-  function arcFor(sessionId) {
-    const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
-    const usable = window.innerHeight - 2 * GAP;
-    // At most half the screen, so there is always vertical room for the
-    // next window on the arc rather than one tall one filling it.
-    const height = Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, Math.floor(usable / 2.2)));
-    const radius = Math.max(MIN_ARC_RADIUS, Math.min(MAX_ARC_RADIUS, window.innerWidth - anchor.x - WINDOW_WIDTH - GAP));
-    return { anchor, height, radius };
-  }
-
-  // How many windows fit on the arc before their title bars start covering
-  // each other - bounded by the arc's own height and by the screen's.
-  function capacityFor(sessionId) {
-    if (narrow()) return MAX_WINDOWS;
-    const arc = arcFor(sessionId);
-    const arcExtent = 2 * arc.radius * Math.sin((ARC_HALF_DEGREES * Math.PI) / 180);
-    const roomOnScreen = window.innerHeight - arc.height - 2 * GAP;
-    const extent = Math.min(arcExtent, Math.max(0, roomOnScreen));
-    return Math.max(1, Math.min(MAX_WINDOWS, Math.floor(extent / ARC_MIN_SEPARATION) + 1));
-  }
-
-  function layout(sessionId) {
-    if (narrow()) return;
-    const mine = [...open.values()].filter((entry) => entry.sessionId === sessionId && !entry.moved);
+    const mine = entriesOf(sessionId).filter((entry) => !entry.moved);
     if (mine.length === 0) return;
-    const arc = arcFor(sessionId);
-    const half = (ARC_HALF_DEGREES * Math.PI) / 180;
-    // The fan opens into the room that is actually there. A row near the
-    // top of the sidebar has little space above it and plenty below, and a
-    // symmetric fan would be limited by the smaller side on both - the
-    // windows clamped against the screen edge, and the arc flat again.
-    const reach = (room) => Math.asin(Math.min(1, Math.max(0, room / arc.radius)));
-    const above = arc.anchor.y - arc.height / 2 - GAP;
-    const below = window.innerHeight - GAP - arc.height / 2 - arc.anchor.y;
-    const from = -Math.min(half, reach(above));
-    const to = Math.min(half, reach(below));
+    const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
+    const before = animate ? mine.map((entry) => boxOf(entry.el)) : null;
+    const placed = arcPlacement(mine.map((entry) => entry.agentId), anchor, viewport());
     mine.forEach((entry, index) => {
-      // By angle around the edge, so the set is a fan whatever the screen
-      // is shaped like: the window level with the row sits furthest out,
-      // the ones above and below swing back in towards it.
-      const t = mine.length === 1 ? 0.5 : index / (mine.length - 1);
-      const angle = from + t * (to - from);
-      const jitter = jitterOf(entry.agentId);
-      const radius = Math.max(MIN_ARC_RADIUS, arc.radius + jitter.radius);
-      entry.x = arc.anchor.x + radius * Math.cos(angle);
-      entry.y = arc.anchor.y + radius * Math.sin(angle) - arc.height / 2 + jitter.y;
-      entry.el.style.width = `${WINDOW_WIDTH}px`;
-      entry.el.style.height = `${arc.height}px`;
-      place(entry, WINDOW_WIDTH);
+      applyBox(entry, clampBox(placed[index], viewport()));
+      if (before) flipFrom(entry.el, before[index], { durationMs: OPEN_MS, easing: spring });
     });
+    drawLines();
   }
 
   function makeDraggable(entry, bar) {
@@ -213,13 +161,14 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       if (narrow()) return;
       event.preventDefault();
       bar.setPointerCapture(event.pointerId);
-      const grabX = event.clientX - entry.x;
-      const grabY = event.clientY - entry.y;
+      // From here on layout() leaves this window alone, so a placement by
+      // hand survives the next re-arrangement.
       entry.moved = true;
+      const grabX = event.clientX - entry.box.x;
+      const grabY = event.clientY - entry.box.y;
       const move = (e) => {
-        entry.x = e.clientX - grabX;
-        entry.y = e.clientY - grabY;
-        place(entry);
+        applyBox(entry, clampBox({ ...entry.box, x: e.clientX - grabX, y: e.clientY - grabY }, viewport()));
+        drawLines();
       };
       const stop = () => {
         bar.removeEventListener('pointermove', move);
@@ -232,8 +181,9 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     });
   }
 
-  function openWindow(sessionId, agent) {
-    const anchor = anchorOf(sessionId);
+  // ---------- opening and closing ----------
+
+  function openWindow(sessionId, agent, index) {
     const el = document.createElement('div');
     el.className = 'agent-window';
     el.innerHTML =
@@ -244,31 +194,22 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     el.querySelector('.agent-window-title').textContent = [agent.agentType, agent.description].filter(Boolean).join(' · ');
     containerEl.appendChild(el);
 
-    const entry = {
-      el,
-      agentId: agent.agentId,
-      sessionId,
-      offset: 0,
-      x: (anchor?.x ?? 0) + MIN_ARC_RADIUS,
-      y: GAP,
-      // Set once this window has been dragged: layout() leaves it alone
-      // from then on, so a placement by hand survives the next one.
-      moved: false,
-    };
+    const entry = { el, agentId: agent.agentId, sessionId, offset: 0, box: null, moved: false, closing: false };
     open.set(agent.agentId, entry);
-    place(entry);
-    // Out of the edge: the window starts collapsed at the anchor and
-    // expands into its place, so it reads as coming from the row.
-    if (anchor && !narrow()) {
+
+    if (anchorOf(sessionId) && !narrow()) {
+      // Out of the edge, one after the other: opening a set in the same frame
+      // reads as one block appearing, a few dozen milliseconds apart reads as
+      // a sequence. The spring lets each overshoot slightly, which is what
+      // makes it look thrown rather than moved.
       el.animate(
-        [{ transform: `translate(${anchor.x - entry.x}px, ${anchor.y - entry.y}px) scale(0.1)`, opacity: 0 },
-          { transform: 'none', opacity: 1 }],
-        { duration: 260, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+        [{ transform: 'scale(0.15)', opacity: 0 }, { transform: 'none', opacity: 1 }],
+        { duration: OPEN_MS, delay: staggerDelay(index), easing: spring, fill: 'backwards' },
       );
     }
     el.querySelector('.agent-window-close').addEventListener('click', () => closeWindow(agent.agentId));
     makeDraggable(entry, el.querySelector('.agent-window-bar'));
-    loadInto(entry, agent.agentId);
+    loadInto(entry);
   }
 
   function closeWindow(agentId) {
@@ -280,80 +221,59 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       entry.el.remove();
       drawLines();
     };
-    if (!anchor || narrow()) {
+    if (!anchor || narrow() || !entry.box) {
       done();
       return;
     }
     // Back into the edge, the same movement reversed.
     entry.el.animate(
       [{ transform: 'none', opacity: 1 },
-        { transform: `translate(${anchor.x - entry.x}px, ${anchor.y - entry.y}px) scale(0.1)`, opacity: 0 }],
-      { duration: 200, easing: 'ease-in' },
+        {
+          transform: `translate(${anchor.x - entry.box.x}px, ${anchor.y - entry.box.y - entry.box.height / 2}px) scale(0.15)`,
+          opacity: 0,
+        }],
+      { duration: CLOSE_MS, easing: 'ease-in' },
     ).addEventListener('finish', done);
   }
 
-  // One cubic curve per open window, from the row edge to the window's left
-  // side. Redrawn on every move rather than tracked per window: the
-  // geometry is cheap and is always right this way.
-  function drawLines() {
-    lineEl.replaceChildren();
-    if (narrow()) return;
-    // Curves to windows in the same row would otherwise run as one bundle;
-    // a different attach height per window fans them apart.
-    const seen = new Map();
-    for (const [agentId, entry] of open) {
-      const anchor = anchorOf(entry.sessionId);
-      if (!anchor) continue;
-      const fan = seen.get(entry.sessionId) ?? 0;
-      seen.set(entry.sessionId, fan + 1);
-      const toX = entry.x;
-      const toY = entry.y + 18 + fan * 12;
-      const bend = Math.max(40, (toX - anchor.x) / 2);
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', `M ${anchor.x} ${anchor.y} C ${anchor.x + bend} ${anchor.y}, ${toX - bend} ${toY}, ${toX} ${toY}`);
-      path.setAttribute('class', 'agent-line');
-      path.dataset.agentId = agentId;
-      lineEl.appendChild(path);
-    }
+  function markDone(entry) {
+    if (entry.closing) return;
+    entry.closing = true;
+    entry.el.classList.add('agent-window-done');
+    const title = entry.el.querySelector('.agent-window-title');
+    title.textContent = `${title.textContent} · finished`;
+    setTimeout(() => closeWindow(entry.agentId), CLOSE_AFTER_DONE_MS);
   }
 
-  // A pulse per event, not a running animation: a still agent has a still
-  // line, so the movement means something.
-  function pulse(agentId) {
-    const path = lineEl.querySelector(`.agent-line[data-agent-id="${agentId}"]`);
-    if (!path) return;
-    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    dot.setAttribute('r', '3');
-    dot.setAttribute('class', 'agent-pulse');
-    const motion = document.createElementNS('http://www.w3.org/2000/svg', 'animateMotion');
-    motion.setAttribute('dur', '0.9s');
-    motion.setAttribute('path', path.getAttribute('d'));
-    motion.setAttribute('fill', 'freeze');
-    dot.appendChild(motion);
-    lineEl.appendChild(dot);
-    motion.addEventListener('endEvent', () => dot.remove());
+  // ---------- what app.js calls ----------
+
+  function capacityFor(sessionId) {
+    if (narrow()) return MAX_WINDOWS;
+    const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
+    return arcCapacity(anchor, viewport(), MAX_WINDOWS);
   }
 
   function toggle(sessionId, agents) {
-    const mine = [...open.values()].some((entry) => entry.sessionId === sessionId);
-    if (mine) {
-      for (const [agentId, entry] of [...open] ) if (entry.sessionId === sessionId) closeWindow(agentId);
+    if (entriesOf(sessionId).length > 0) {
+      for (const entry of entriesOf(sessionId)) closeWindow(entry.agentId);
       return;
     }
-    agents.filter((a) => a.status === 'active').slice(0, capacityFor(sessionId))
-      .forEach((agent) => openWindow(sessionId, agent));
-    layout(sessionId);
+    agents.filter((agent) => agent.status === 'active').slice(0, capacityFor(sessionId))
+      .forEach((agent, index) => openWindow(sessionId, agent, index));
+    // No FLIP on the first placement: the windows are already arriving from
+    // the edge, and animating a move on top of that fights it.
+    layout(sessionId, { animate: false });
   }
 
   function noteDelta(sessionId, agents) {
-    const showing = [...open.values()].filter((entry) => entry.sessionId === sessionId).length;
+    const showing = entriesOf(sessionId).length;
     let placed = showing;
     for (const agent of agents) {
-      if (open.has(agent.agentId)) {
-        const entry = open.get(agent.agentId);
-        loadInto(entry, agent.agentId);
-        pulse(agent.agentId);
-        if (agent.status !== 'active') markDone(entry, agent.agentId);
+      const entry = open.get(agent.agentId);
+      if (entry) {
+        loadInto(entry);
+        lines.pulse(agent.agentId);
+        if (agent.status !== 'active') markDone(entry);
         continue;
       }
       // An agent that starts while this session's windows are open gets one
@@ -361,43 +281,41 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       // ever appeared, and the next agent stayed invisible behind a count
       // that had already gone up.
       if (showing > 0 && agent.status === 'active' && placed < capacityFor(sessionId)) {
-        openWindow(sessionId, agent);
+        openWindow(sessionId, agent, 0);
         placed += 1;
         layout(sessionId);
       }
     }
   }
 
-  function markDone(entry, agentId) {
-    if (entry.closing) return;
-    entry.closing = true;
-    entry.el.classList.add('agent-window-done');
-    const title = entry.el.querySelector('.agent-window-title');
-    title.textContent = `${title.textContent} · finished`;
-    setTimeout(() => closeWindow(agentId), CLOSE_AFTER_DONE_MS);
-  }
-
   function closeAll() {
     for (const agentId of [...open.keys()]) closeWindow(agentId);
   }
 
-  // A window whose row is gone - the session was ended, or the list no
-  // longer shows it - has nothing left to belong to. Called after a list
-  // rebuild, since no stream event reports a session's disappearance.
+  // The row, not its edge: the edge hides as soon as the count drops to zero,
+  // and a finished window still has its few seconds to show that it did.
   function pruneMissingRows() {
-    for (const [agentId, entry] of [...open]) {
-      // The row, not its edge: the edge hides as soon as the count drops to
-      // zero, and a finished window still has its few seconds to show that
-      // it finished.
-      if (!document.querySelector(`.session-row[data-session-id="${entry.sessionId}"]`)) closeWindow(agentId);
+    for (const entry of [...open.values()]) {
+      if (!document.querySelector(`.session-row[data-session-id="${entry.sessionId}"]`)) closeWindow(entry.agentId);
     }
   }
 
+  // Below the breakpoint the windows are a stack laid out by the stylesheet,
+  // so the inline box a wider screen wrote has to come off - CSS cannot
+  // override an inline style without shouting.
+  function unpin(entry) {
+    entry.box = null;
+    for (const property of ['left', 'top', 'width', 'height']) entry.el.style.removeProperty(property);
+  }
+
   window.addEventListener('resize', () => {
-    // Re-tiled rather than only clamped: the number of columns that fit has
-    // probably changed. A window placed by hand keeps its spot.
+    if (narrow()) {
+      for (const entry of open.values()) unpin(entry);
+      drawLines();
+      return;
+    }
     for (const sessionId of new Set([...open.values()].map((entry) => entry.sessionId))) layout(sessionId);
-    for (const entry of open.values()) place(entry);
+    for (const entry of open.values()) if (entry.moved && entry.box) applyBox(entry, clampBox(entry.box, viewport()));
     drawLines();
   });
   // The anchor moves with the list, so the curves have to follow it.
