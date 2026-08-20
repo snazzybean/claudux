@@ -178,5 +178,24 @@ export function initSubagents({
     renderOrbit(known.get(sessionId) ?? new Map());
   }
 
-  return { handleEvent, sessionOpened };
+  // No session is open any more. Its own name for it rather than
+  // sessionOpened(null): the delta stream never reports "this session is
+  // gone", and activeSessionId() turning null triggers no render on its
+  // own, so without this the orbit and popover of the session that just
+  // closed would stay on screen indefinitely.
+  function close() {
+    closePopover();
+    renderOrbit(new Map());
+  }
+
+  // render() in app.js rebuilds the whole session list, and every rebuilt
+  // badge comes back hidden. The stream only carries deltas, so nothing
+  // would re-apply a count until an agent's state actually changes - which
+  // for a stable set of running agents may be never. Same idiom as the
+  // activity dots: re-apply what is already known after a rebuild.
+  function refreshBadges() {
+    for (const [sessionId, sessionAgents] of known) updateBadge(sessionId, sessionAgents);
+  }
+
+  return { handleEvent, sessionOpened, close, refreshBadges };
 }
