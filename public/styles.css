@@ -2100,7 +2100,14 @@ button { cursor: pointer; }
   from { stroke-dashoffset: 17; }
   to { stroke-dashoffset: 0; }
 }
+/* Which way a message went, in colour as well as direction: out from the row
+   in the accent that everything else about a running agent uses, back from
+   the agent in the attention colour, since that is the one carrying an
+   answer. */
 .agent-pulse { fill: var(--live); }
+.agent-pulse-toAgent { fill: var(--accent); }
+.agent-pulse-toLead { fill: var(--danger); }
+.agent-trunk { opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) {
   .agent-pulse { display: none; }
   .agent-line { animation: none; stroke-dasharray: none; }

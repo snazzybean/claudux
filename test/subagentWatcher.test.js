@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { setMeta } from '../src/lib/sessionMeta.js';
-import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, agentAppearsDone, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
+import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
 
 // Claude Code writes a session's own transcript at
 // <projectDir>/<sessionId>.jsonl and its subagents' transcripts at
@@ -105,32 +105,9 @@ test('currentToolFromAgentTranscript skips broken lines', () => {
   assert.deepEqual(currentToolFromAgentTranscript(jsonl), { name: 'Grep', input: {} });
 });
 
-test('agentAppearsDone accepts a last assistant turn that only answers', () => {
-  const jsonl =
-    line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: {} }] } })
-    + line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1' }] } })
-    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Here is what I found.' }], stop_reason: 'end_turn' } });
-  assert.equal(agentAppearsDone(jsonl), true);
-});
 
-test('agentAppearsDone rejects a last assistant turn that still calls a tool', () => {
-  const jsonl =
-    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Let me look.' }] } })
-    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', name: 'Bash', input: {} }] } });
-  assert.equal(agentAppearsDone(jsonl), false);
-});
 
-test('agentAppearsDone rejects a transcript without any assistant entry', () => {
-  assert.equal(agentAppearsDone(line({ type: 'user', message: { content: [] } })), false);
-  assert.equal(agentAppearsDone(''), false);
-  assert.equal(agentAppearsDone(null), false);
-});
 
-test('agentAppearsDone falls back to the last VALID assistant entry on a broken line', () => {
-  const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' } })
-    + '{"type":"assistant","message":{"con\n';
-  assert.equal(agentAppearsDone(jsonl), true);
-});
 
 function writeAgent(dir, agentId, meta, transcriptLines) {
   fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta));
@@ -154,11 +131,11 @@ test('subagentSnapshot reads every agent in the subagents directory', () => {
   assert.deepEqual(snapshot, [
     {
       agentId: 'aaa111', agentType: 'general-purpose', description: 'Explore', spawnDepth: 1,
-      currentTool: { name: 'Grep', input: { pattern: 'auth' } }, resolved: false, silent: false,
+      currentTool: { name: 'Grep', input: { pattern: 'auth' } }, resolved: false, silent: false, name: null,
     },
     {
       agentId: 'bbb222', agentType: 'code-review', description: 'Review', spawnDepth: 1,
-      currentTool: { name: 'Read', input: { file_path: 'x.js' } }, resolved: false, silent: false,
+      currentTool: { name: 'Read', input: { file_path: 'x.js' } }, resolved: false, silent: false, name: null,
     },
   ]);
 });
@@ -606,24 +583,7 @@ test('subagentSnapshot skips an agent id that could leave the subagents director
   assert.equal(snapshot[0].resolved, false);
 });
 
-// The case caught in the browser: an agent reading a file in slices wrote
-// a line of commentary between two Bash calls and was reported done in the
-// middle of its work - and 'done' is sticky, so its node faded and never
-// came back. A turn that has really ended says so in stop_reason.
-test('agentAppearsDone rejects an answer that is still mid-turn', () => {
-  const jsonl =
-    line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] }, stop_reason: 'tool_use' })
-    + line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1' }] } })
-    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Now the next slice.' }], stop_reason: null } });
-  assert.equal(agentAppearsDone(jsonl), false);
-});
 
-test('agentAppearsDone accepts every stop_reason that ends a turn', () => {
-  for (const stop of ['end_turn', 'stop_sequence', 'max_tokens']) {
-    const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'answer' }], stop_reason: stop } });
-    assert.equal(agentAppearsDone(jsonl), true, stop);
-  }
-});
 
 test('subagentSnapshot keeps an id-less agent active while it narrates between tool calls', () => {
   const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
@@ -800,4 +760,47 @@ test('subagentSnapshot keeps a named agent active while it is a member and mid-t
 
   const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
   assert.equal(agentRow.resolved, false);
+});
+
+// The line between the row and a window stands for a connection, so a pulse
+// on it should stand for a message rather than for any change at all. Both
+// directions are on disk: the lead's own transcript names who it wrote to,
+// and an agent writing back does it with a SendMessage tool call of its own.
+test('runSubagentWatcherOnce marks an agent the session has just written to', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const events = await runSubagentWatcherOnce(config, new Map(), {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: false }],
+    snapshotFn: () => [agent({ name: 'Vermessung' })],
+    messagedFn: () => new Set(['Vermessung']),
+  });
+  assert.equal(events[0].agents[0].signal, 'toAgent');
+});
+
+test('runSubagentWatcherOnce marks an agent that is writing back', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const events = await runSubagentWatcherOnce(config, new Map(), {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: false }],
+    snapshotFn: () => [agent({ name: 'Vermessung', currentTool: { name: 'SendMessage', input: { to: 'team-lead' } } })],
+    messagedFn: () => new Set(),
+  });
+  assert.equal(events[0].agents[0].signal, 'toLead');
+});
+
+test('runSubagentWatcherOnce leaves an ordinary change without a signal', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const events = await runSubagentWatcherOnce(config, new Map(), {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: false }],
+    snapshotFn: () => [agent({ name: 'Vermessung' })],
+    messagedFn: () => new Set(),
+  });
+  assert.equal(events[0].agents[0].signal, null);
 });

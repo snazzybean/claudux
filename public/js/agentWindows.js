@@ -279,7 +279,9 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       const entry = open.get(agent.agentId);
       if (entry) {
         loadInto(entry);
-        lines.pulse(agent.agentId);
+        // Only a real message gets a pulse. Every other delta is the agent
+        // changing tools, and a line that flashes for that says nothing.
+        if (agent.signal) lines.pulse(agent.agentId, agent.signal);
         if (agent.status !== 'active') markDone(entry);
         continue;
       }

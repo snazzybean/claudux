@@ -14,7 +14,8 @@ import { createResolvedTracker } from './resolvedIds.js';
 import { readRegistry, reconcile } from './sessionRegistry.js';
 import { listTmuxSessions, aliveSessionNames } from './tmuxManager.js';
 import { getMeta, claudeSessionIdsForTmux } from './sessionMeta.js';
-import { liveTeamMembers } from './teamRegistry.js';
+import { createTrafficTracker } from './teamTraffic.js';
+import { agentIsResolved, SILENT_DONE_MS } from './agentDone.js';
 
 // A session's own transcript sits at <projectDir>/<sessionId>.jsonl; its
 // subagents live in the sibling directory <projectDir>/<sessionId>/subagents.
@@ -76,98 +77,21 @@ export function currentToolFromAgentTranscript(jsonlText) {
   return tool;
 }
 
-// Whether an agent's own transcript ends on a turn that is actually over.
-// Used only where no toolUseId links the agent to a caller (a named agent
-// or a slash-command one); wherever an id exists it stays authoritative,
-// since it does not have to read the end of a file that could still grow.
-const TERMINAL_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens']);
-
-export function agentAppearsDone(jsonlText) {
-  let lastAssistant = null;
-  for (const rawLine of String(jsonlText ?? '').split('\n')) {
-    if (!rawLine.trim()) continue;
-    let entry;
-    try {
-      entry = JSON.parse(rawLine);
-    } catch {
-      continue;
-    }
-    if (entry?.type === 'assistant') lastAssistant = entry;
-  }
-  const content = lastAssistant?.message?.content;
-  if (!Array.isArray(content) || content.length === 0) return false;
-  if (content.some((block) => block?.type === 'tool_use')) return false;
-  // "No tool_use in the last turn" alone is not enough, and the difference
-  // is the common case rather than the edge: an agent that writes a line
-  // of commentary between two tool calls looks exactly like one that has
-  // answered - and since 'done' is sticky, its node faded mid-work and
-  // never came back. An ended turn says so; a turn still in flight
-  // carries stop_reason null.
-  return TERMINAL_STOP_REASONS.has(lastAssistant.message?.stop_reason);
-}
-
-// An agent spawned under a name carries that name in its id, hyphen
-// included (agent-aExportSweep-acebce40dd0e83d3), so the class cannot be
-// alphanumeric only - that skipped such an agent entirely. It stays a
-// whitelist all the same: the id goes straight into a path.join, and
-// neither a dot nor a separator gets in.
 export const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 
-// Where an agent's completion is recorded depends on who spawned it, so
-// three cases rather than one session-wide lookup. `ownTranscript` is the
-// text subagentSnapshot already read for currentTool - null when that read
-// failed, which agentAppearsDone reads as "not done".
-// Nothing written for this long and the agent is treated as gone. The last
-// resort only: it applies where neither an id nor a team registry can
-// answer, which after the registry is a `Task` agent whose caller never
-// recorded a result. Reported separately from `resolved` and not sticky,
-// since a slow tool call looks the same and has to be able to come back.
-const SILENT_DONE_MS = 10 * 60 * 1000;
-
-// An agent's registry entry and its meta file are written at almost the
-// same moment. Reading between the two must not brand a brand-new agent as
-// finished, because that verdict is sticky.
-const REGISTRY_GRACE_MS = 3000;
-
-function agentIsResolved(claudeHome, dir, meta, sessionResolved, ownTranscript, tracker, silentForMs, superseded) {
-  // A newer agent carries this one's name now, so the team's entry is not
-  // about this instance - and a team never holds two of a name at once.
-  if (superseded) return true;
-  // A named agent records no tool_result anywhere, so its two signals are
-  // its team's registry and its own transcript - and each covers the
-  // other's blind spot. Gone from the registry means stopped or killed,
-  // which leaves no closing message behind. An ended turn in its own
-  // transcript means it has answered - and it stays a team member after
-  // that, waiting for another task, so the registry alone reported every
-  // finished agent as running.
-  if (meta.name && meta.teamName) {
-    if (agentAppearsDone(ownTranscript)) return true;
-    const live = liveTeamMembers(claudeHome, meta.teamName);
-    // null means the registry could not be read, not that the team is
-    // empty - only a readable one may be taken as evidence.
-    if (live) return !live.has(meta.name) && silentForMs >= REGISTRY_GRACE_MS;
+// A nested agent's tool_result lands in the transcript of the AGENT that
+// spawned it, so that file has to be read for it. Null when there is no
+// parent, when its id could not be trusted with a path.join - only the id in
+// a FILE NAME was ever checked - or when the file is missing, which is an
+// orphaned meta and never a reason to lose the whole snapshot.
+function parentIdsFor(dir, meta, tracker) {
+  if (!meta.parentAgentId || !AGENT_ID_RE.test(meta.parentAgentId)) return null;
+  try {
+    return tracker.idsFor(path.join(dir, `agent-${meta.parentAgentId}.jsonl`));
+  } catch {
+    return null;
   }
-  // A slash command spawns an agent without a Task call, so there is no id
-  // to look for anywhere - its own transcript is the only evidence there is.
-  if (!meta.toolUseId) return agentAppearsDone(ownTranscript);
-  // A nested agent's tool_result lands in the transcript of the AGENT that
-  // spawned it, never in the session's own - measured: 0 of 8 nested agents
-  // were resolvable from the session file, all 8 from their parent's.
-  if (meta.parentAgentId) {
-    // Held to the same whitelist as an agent's own id: it reaches the same
-    // path.join, and only the id in the FILE NAME was ever checked.
-    if (!AGENT_ID_RE.test(meta.parentAgentId)) return false;
-    try {
-      const parentPath = path.join(dir, `agent-${meta.parentAgentId}.jsonl`);
-      return tracker.idsFor(parentPath).has(meta.toolUseId);
-    } catch {
-      // Parent file missing (an orphaned meta) or read mid-write - not
-      // resolved yet, and never a reason to lose the whole snapshot.
-      return false;
-    }
-  }
-  return sessionResolved.has(meta.toolUseId);
 }
 
 // One snapshot of every subagent currently on disk for a session - no
@@ -244,9 +168,19 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
       agentId: entry.agentId,
       agentType: entry.meta.agentType,
       description: entry.meta.description,
+      // The session's own transcript addresses an agent by name, never by
+      // id, so the name has to travel with the snapshot for the two to be
+      // matched up.
+      name: entry.meta.name,
       spawnDepth: entry.meta.spawnDepth,
       currentTool: currentToolFromAgentTranscript(entry.ownTranscript),
-      resolved: agentIsResolved(claudeHome, dir, entry.meta, resolved, entry.ownTranscript, tracker, entry.silentForMs, superseded),
+      resolved: agentIsResolved(claudeHome, entry.meta, {
+        sessionResolved: resolved,
+        parentResolved: parentIdsFor(dir, entry.meta, tracker),
+        ownTranscript: entry.ownTranscript,
+        silentForMs: entry.silentForMs,
+        superseded,
+      }),
       silent: entry.silentForMs >= SILENT_DONE_MS,
     };
   });
@@ -256,7 +190,13 @@ function toolKeyOf(agent) {
   return agent.currentTool ? `${agent.currentTool.name}:${JSON.stringify(agent.currentTool.input)}` : null;
 }
 
-function eventFor(agent, status) {
+// `signal` says which way something just travelled between the session and
+// this agent, so the line between them can carry a pulse that means a message
+// rather than any change at all. Both directions come off disk: `messaged` is
+// what the session's transcript says it wrote to, and an agent writing back
+// does it with a SendMessage tool call of its own, which is already its
+// current tool.
+function eventFor(agent, status, messaged) {
   return {
     agentId: agent.agentId,
     agentType: agent.agentType,
@@ -264,7 +204,14 @@ function eventFor(agent, status) {
     spawnDepth: agent.spawnDepth,
     currentTool: agent.currentTool,
     status,
+    signal: signalFor(agent, messaged),
   };
+}
+
+function signalFor(agent, messaged) {
+  if (agent.name && messaged?.has(agent.name)) return 'toAgent';
+  if (agent.currentTool?.name === 'SendMessage') return 'toLead';
+  return null;
 }
 
 // Compares a fresh snapshot against what the previous tick knew.
@@ -272,7 +219,7 @@ function eventFor(agent, status) {
 // A `done` agent stays in `next` with that status FOREVER (for the life of
 // this process's state Map) rather than being dropped - see the task
 // description above for why dropping it re-fires the event forever.
-export function diffSubagents(previous, snapshot) {
+export function diffSubagents(previous, snapshot, messaged) {
   const previousMap = previous ?? new Map();
   const next = new Map();
   const events = [];
@@ -296,7 +243,7 @@ export function diffSubagents(previous, snapshot) {
     const firstSightDone = !prior && status === 'done';
     const changed = !firstSightDone && (!prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey));
     next.set(a.agentId, { status, settled, toolKey });
-    if (changed) events.push(eventFor(a, status));
+    if (changed) events.push(eventFor(a, status, messaged));
   }
   return { events, next };
 }
@@ -311,9 +258,13 @@ export async function runSubagentWatcherOnce(config, state, {
   // only a tracker that outlives the call reads a transcript once instead
   // of on every pass.
   tracker = createResolvedTracker(),
+  // Same reasoning as the tracker above: correct per call, but only one that
+  // outlives the call reports a message once instead of on every pass.
+  traffic = createTrafficTracker(),
   registryFn = () => readRegistry(config.claudeHome),
   listFn = () => listTmuxSessions(),
   snapshotFn = (sessionIds) => subagentSnapshot(config.claudeHome, sessionIds, tracker),
+  messagedFn = (sessionIds) => traffic.messagedSince(chooseTranscript(config.claudeHome, sessionIds)),
 } = {}) {
   const registry = registryFn();
   const sessions = await listFn();
@@ -331,7 +282,7 @@ export async function runSubagentWatcherOnce(config, state, {
     if (!meta) continue; // not a session Claudux started
     const sessionIds = claudeSessionIdsForTmux(config.dataDir, tmuxSession);
     const snapshot = snapshotFn(sessionIds);
-    const { events: agentEvents, next } = diffSubagents(state.get(tmuxSession), snapshot);
+    const { events: agentEvents, next } = diffSubagents(state.get(tmuxSession), snapshot, messagedFn(sessionIds));
     state.set(tmuxSession, next);
     if (agentEvents.length > 0) {
       events.push({ tmuxSession, sessionId: entry.sessionId, agents: agentEvents });
@@ -352,6 +303,7 @@ export function startSubagentWatcherInterval(config, {
 } = {}) {
   const state = new Map();
   const tracker = createResolvedTracker();
+  const traffic = createTrafficTracker();
   // Everything already published, merged per session. A client that
   // connects later never saw the deltas that made the running agents
   // appear, and the stream has nothing else to offer it - so the same
@@ -373,7 +325,7 @@ export function startSubagentWatcherInterval(config, {
   }
 
   const timer = setIntervalFn(() => {
-    runFn(config, state, { tracker })
+    runFn(config, state, { tracker, traffic })
       .then((events) => {
         record(events);
         onEvents(events);

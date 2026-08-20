@@ -88,14 +88,24 @@ export function initAgentLines(svgEl) {
     }
   }
 
-  // One pulse per real event rather than a permanent traveller: the line's
-  // own flow says "something hangs here", the pulse says "something just
-  // happened".
-  function pulse(agentId) {
+  // A pulse stands for one message, and it travels the way the message did:
+  // out from the row for something the session sent the agent, back along the
+  // same path for something the agent sent the session. The line's own flow
+  // says "something hangs here"; a pulse says "this just went past".
+  function pulse(agentId, direction = 'toAgent') {
     const d = paths.get(agentId);
     if (!d) return;
-    const dot = element('circle', { r: 4, class: 'agent-pulse' });
-    const motion = element('animateMotion', { dur: `${PULSE_DURATION_MS / 1000}s`, path: d, fill: 'freeze' });
+    const dot = element('circle', { r: 4, class: `agent-pulse agent-pulse-${direction}` });
+    const motion = element('animateMotion', {
+      dur: `${PULSE_DURATION_MS / 1000}s`,
+      path: d,
+      fill: 'freeze',
+      // Same path either way; a message from the agent simply runs it
+      // backwards, which is also what makes the two read as one channel.
+      keyPoints: direction === 'toLead' ? '1;0' : '0;1',
+      keyTimes: '0;1',
+      calcMode: 'linear',
+    });
     dot.appendChild(motion);
     group.appendChild(dot);
     motion.addEventListener('endEvent', () => dot.remove());
