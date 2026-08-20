@@ -181,6 +181,17 @@
                  sits behind it. -->
             <div class="usage-backdrop" id="usageBackdrop" hidden></div>
             <div class="usage-popover" id="usagePopover" role="dialog" aria-label="Usage" hidden></div>
+            <!-- Subagent orbit: nodes for the open session's currently running
+                 Task-tool subagents. Lives here rather than inside #terminalFrame -
+                 that's ttyd's own iframe document, not reachable from ours. See
+                 docs/superpowers/specs/2026-08-20-claudux-subagent-umlaufbahn-design.md. -->
+            <!-- Not aria-hidden: each node carries its own role="button"
+                 and aria-label (see subagents.js), which aria-hidden on
+                 the parent would remove from the accessibility tree
+                 wholesale. -->
+            <svg class="subagent-orbit" id="subagentOrbit" hidden></svg>
+            <div class="usage-backdrop" id="subagentBackdrop" hidden></div>
+            <div class="menu-panel subagent-popover" id="subagentPopover" role="dialog" aria-label="Subagent" hidden></div>
           </div>
           <iframe class="terminal-frame" id="terminalFrame" title="Terminal"></iframe>
           <!-- Shown whenever account, project, or a first-ever session is

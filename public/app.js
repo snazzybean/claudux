@@ -12,6 +12,9 @@ import {
   accountBadgeEl,
   usagePopoverEl,
   usageBackdropEl,
+  subagentOrbitEl,
+  subagentPopoverEl,
+  subagentBackdropEl,
   tabTerminalEl,
   tabFilesEl,
   backBtnEl,
@@ -38,6 +41,7 @@ import {
   setStuckTerminalRecovery,
 } from './js/terminal.js';
 import { initUsage } from './js/usage.js';
+import { initSubagents } from './js/subagents.js';
 import { showFiles, leaveFiles } from './js/files.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
@@ -361,9 +365,23 @@ function updateProjectBusy() {
   }
 }
 
-startEventStream(({ tmuxSession, sessionId, state }) => {
-  applyActivityState(tmuxSession, sessionId, state);
+// activeSessionId() wraps openSessionId(), reused rather than duplicated,
+// so initSubagents gets a zero-arg getter. Named activeSessionId, not
+// openSessionId, so the parameter at the call site doesn't read as
+// invoking the module-scope function of that name (public/app.js:816).
+const subagents = initSubagents({
+  orbitEl: subagentOrbitEl,
+  popoverEl: subagentPopoverEl,
+  backdropEl: subagentBackdropEl,
+  activeSessionId: () => openSessionId(currentProject?.sessions ?? []),
 });
+
+startEventStream(
+  ({ tmuxSession, sessionId, state }) => {
+    applyActivityState(tmuxSession, sessionId, state);
+  },
+  (payload) => subagents.handleEvent(payload),
+);
 
 async function refreshProjectSessions(project) {
   try {
@@ -909,6 +927,7 @@ function buildSessionRow(project, session, fallbackAccountSelect) {
     '>' +
     svg('power', 'icon-symbol') +
     '</span>' +
+    `<span class="subagent-badge" data-session-id="${escapeHtml(session.id)}" hidden></span>` +
     // Title and last prompt stacked. The prompt is omitted when it matches
     // the title - which is the case for every session that doesn't have an
     // ai-title yet, and the same text twice adds nothing.
@@ -1484,6 +1503,7 @@ function openSession(project, session) {
   usage?.close();
   currentProject = project;
   currentSessionId = session.id;
+  subagents.sessionOpened(session.id);
   currentLoginSessionId = null; // a real session replaces the login terminal
   // The signpost belongs to the login terminal, not to the panel: over an
   // ordinary session it would point at a process that isn't running here.

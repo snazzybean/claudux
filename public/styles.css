@@ -1078,6 +1078,16 @@ button { cursor: pointer; }
   background: var(--surface-hover); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
 }
+/* .subagent-badge sits between the dot and the title in the markup, so
+   showing it needs its own column - like .lock-btn below, it costs
+   nothing while [hidden] (removed from the grid via display:none), but
+   unlike .lock-btn its visibility is per-session data, not one app-wide
+   flag, hence :has() rather than an .app[data-edit] selector. Combined
+   with edit mode below so both extra columns apply together when both
+   are showing. */
+.session-row:has(.subagent-badge:not([hidden])) {
+  grid-template-columns: 14px 20px 1fr 30px 26px 0;
+}
 .session-row:hover:not(:disabled) {
   background: var(--surface-hover); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 84%, var(--text));
@@ -1304,6 +1314,9 @@ button { cursor: pointer; }
 .lock-btn { display: none; }
 .app[data-edit="on"] .session-row {
   grid-template-columns: 14px 1fr 30px auto 18px;
+}
+.app[data-edit="on"] .session-row:has(.subagent-badge:not([hidden])) {
+  grid-template-columns: 14px 20px 1fr 30px auto 18px;
 }
 /* .btn-quiet, plus its own font-size/line-height and the edit-mode-only
    visibility. */
@@ -1947,6 +1960,77 @@ button { cursor: pointer; }
   z-index: 4;
 }
 .usage-backdrop[hidden] { display: none; }
+
+/* Subagent orbit: nodes for the open session's running Task-tool
+   subagents. Below the top-right control bar rather than on top of it -
+   .overlay-group's buttons sit flush with .panel-overlay's own top edge,
+   and the orbit's own nodes take pointer-events:auto, so sharing that
+   corner would let a rotating node steal a click meant for "More
+   actions" or the mode switch. --overlay-height is the bar's height
+   (same variable .copy-text-panel and .files-panel use for their own
+   clearance); the 8px .panel-overlay itself is inset by is already
+   this element's containing block, so it isn't repeated here - a 6px gap
+   below the bar is the whole offset.
+   112x112 rather than a box sized to the visible ring: with no viewBox,
+   an embedded <svg> clips to its own box like any non-root SVG, and the
+   outermost radius (46, see ORBIT_RADIUS_BY_DEPTH in subagents.js) plus
+   the node's own radius (4) needs the full 50px from center - subagents.js
+   centers nodes on this box's midpoint (56) and the two must stay in
+   sync. Reuses --live/--waiting and the existing `pulse` keyframe (see
+   .dot and .rail-dot above) rather than a new color scale. */
+.subagent-orbit {
+  position: absolute;
+  top: calc(var(--overlay-height) + 6px);
+  right: 8px;
+  width: 112px;
+  height: 112px;
+  pointer-events: none;
+}
+.subagent-orbit[hidden] { display: none; }
+.subagent-node {
+  fill: var(--live);
+  pointer-events: auto;
+  cursor: pointer;
+  animation: orbit-spin 18s linear infinite;
+  transform-origin: 56px 56px;
+}
+.subagent-node-done {
+  fill: var(--waiting);
+  opacity: 0;
+  transition: opacity 1.6s ease-out;
+}
+@keyframes orbit-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .subagent-node { animation: none; }
+}
+
+/* z-index above #subagentBackdrop's 4 (it reuses .usage-backdrop, see
+   index.html) - .menu-panel itself sets none, so without this the
+   backdrop would paint over the popover and swallow every click meant
+   for it, the same lesson .usage-popover documents at its own z-index. */
+.subagent-popover { z-index: 5; min-width: 200px; padding: 10px 12px; gap: 4px; }
+.subagent-popover-type { font-size: var(--fs-meta); color: var(--text-muted); }
+.subagent-popover-desc { font-size: var(--fs-body); }
+.subagent-popover-tool { font-size: var(--fs-meta); color: var(--live); font-family: var(--font-mono); }
+
+/* Sidebar badge: how many active subagents a NOT-open session has. Same
+   idiom as the account chip - small, quiet, only visible when non-zero.
+   Its own grid column on .session-row (see the :has() rules near
+   .session-row and .lock-btn above) - it sits between the dot and the
+   title in the markup, and [hidden] keeps it out of the grid entirely
+   while there's nothing to show, the same way .lock-btn stays out
+   outside edit mode. */
+.subagent-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-meta);
+  color: var(--on-accent);
+  background: var(--live);
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+}
+.subagent-badge[hidden] { display: none; }
 
 /* Account on the left, model on the right - both apply to everything
    below. */

@@ -1,0 +1,159 @@
+// public/js/subagents.js
+//
+// Renders two things from the same "subagents" SSE stream: an orbit of
+// small nodes around the open session's status dot, and a quiet counter
+// badge on every OTHER session's sidebar row. Deliberately not Codeman-
+// style floating windows - there is no real second terminal behind a
+// subagent (see the design doc), so a summary that needs no dragging and
+// no position tracking is the honest representation.
+import { escapeHtml } from './messages.js';
+
+const ORBIT_RADIUS_BY_DEPTH = [22, 34, 46]; // spawnDepth 1, 2, 3+ - nested
+// Task calls run visibly further out, an honest picture of the actual
+// nesting rather than a made-up spacing.
+//
+// Center of the 112x112 box in styles.css's .subagent-orbit - kept as a
+// constant here rather than read from the DOM, since the two have to
+// agree exactly: the outermost radius (46) plus the node's own radius (4)
+// must stay inside the box, or the SVG viewport (which clips by default,
+// same as any non-root <svg>) cuts the outer ring off.
+const ORBIT_CENTER = 56;
+
+function radiusFor(spawnDepth) {
+  const i = Math.min(Math.max(spawnDepth, 1), ORBIT_RADIUS_BY_DEPTH.length) - 1;
+  return ORBIT_RADIUS_BY_DEPTH[i];
+}
+
+function toolLine(agent) {
+  if (!agent.currentTool) return agent.description || agent.agentType;
+  return `${agent.currentTool.name}${agent.currentTool.input?.file_path ? ` ${agent.currentTool.input.file_path}` : ''}`;
+}
+
+// sessionRowSelector(id) and activeSessionId() are passed in rather than
+// imported from app.js - same reason usage.js takes sessionId() as a
+// parameter: an `export let` assigned elsewhere never reaches the
+// importing module, and importing app.js back would re-run its top-level
+// side effects at an unpredictable point.
+export function initSubagents({
+  orbitEl, popoverEl, backdropEl,
+  sessionRowSelector = (id) => document.querySelector(`.session-row[data-session-id="${id}"] .subagent-badge`),
+  activeSessionId,
+}) {
+  // sessionId -> Map(agentId -> agent snapshot with status)
+  const known = new Map();
+  let popoverOpenAgentId = null;
+
+  function closePopover() {
+    popoverOpenAgentId = null;
+    popoverEl.hidden = true;
+    backdropEl.hidden = true;
+  }
+
+  function openPopover(agent, nodeEl) {
+    popoverOpenAgentId = agent.agentId;
+    const rect = nodeEl.getBoundingClientRect();
+    // .panel-overlay, not .terminal-wrap: #subagentPopover's own
+    // position:absolute (via .menu-panel) resolves top/right against its
+    // nearest POSITIONED ancestor, which is .panel-overlay itself (it sets
+    // position:absolute; .terminal-wrap is one level further out and would
+    // put the popover 8px/10px off - the same containing block #usagePopover
+    // relies on for its own static top/right).
+    const overlayRect = orbitEl.closest('.panel-overlay').getBoundingClientRect();
+    popoverEl.style.top = `${rect.top - overlayRect.top + rect.height + 6}px`;
+    popoverEl.style.right = `${overlayRect.right - rect.right}px`;
+    popoverEl.innerHTML =
+      `<div class="subagent-popover-type">${escapeHtml(agent.agentType)}</div>` +
+      `<div class="subagent-popover-desc">${escapeHtml(agent.description || '')}</div>` +
+      `<div class="subagent-popover-tool">${escapeHtml(toolLine(agent))}</div>`;
+    popoverEl.hidden = false;
+    backdropEl.hidden = false;
+  }
+
+  backdropEl.addEventListener('click', closePopover);
+
+  function renderOrbit(sessionAgents) {
+    if (popoverOpenAgentId && !sessionAgents.has(popoverOpenAgentId)) closePopover();
+    const active = [...sessionAgents.values()].filter((a) => a.status !== 'faded');
+    if (active.length === 0) {
+      orbitEl.hidden = true;
+      orbitEl.replaceChildren();
+      return;
+    }
+    orbitEl.hidden = false;
+    orbitEl.replaceChildren();
+    active.forEach((agent, i) => {
+      const angle = (i / active.length) * Math.PI * 2;
+      const r = radiusFor(agent.spawnDepth);
+      const node = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      node.setAttribute('r', '4');
+      node.setAttribute('cx', String(ORBIT_CENTER + r * Math.cos(angle)));
+      node.setAttribute('cy', String(ORBIT_CENTER + r * Math.sin(angle)));
+      node.setAttribute('class', `subagent-node${agent.status === 'done' ? ' subagent-node-done' : ''}`);
+      node.dataset.agentId = agent.agentId;
+      node.tabIndex = 0;
+      node.setAttribute('role', 'button');
+      node.setAttribute('aria-label', `${agent.agentType}: ${toolLine(agent)}`);
+      node.addEventListener('click', () => openPopover(agent, node));
+      // Same Enter/Space-activates idiom as the sidebar's own custom
+      // buttons (.lock-btn, .dot[data-stop] in app.js) - role="button"
+      // alone doesn't make a non-native element keyboard-operable.
+      node.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        openPopover(agent, node);
+      });
+      orbitEl.appendChild(node);
+      if (agent.justPulsed) {
+        node.animate(
+          [{ r: 4 }, { r: 7 }, { r: 4 }],
+          { duration: 500, easing: 'ease-out' },
+        );
+      }
+    });
+  }
+
+  function updateBadge(sessionId, sessionAgents) {
+    const badge = sessionRowSelector(sessionId);
+    if (!badge) return;
+    const count = [...sessionAgents.values()].filter((a) => a.status === 'active').length;
+    if (count === 0) {
+      badge.hidden = true;
+    } else {
+      badge.hidden = false;
+      badge.textContent = String(count);
+    }
+  }
+
+  function handleEvent({ sessionId, agents }) {
+    const sessionAgents = known.get(sessionId) ?? new Map();
+    for (const agent of agents) {
+      const previous = sessionAgents.get(agent.agentId);
+      sessionAgents.set(agent.agentId, {
+        ...agent,
+        // A pulse fires once, on the tick that reports it - never replayed
+        // from a later renderOrbit() call for an unrelated reason.
+        justPulsed: agent.status === 'active' && Boolean(previous),
+      });
+      // A 'done' agent gets exactly one more render as 'done' (the fade-out
+      // CSS transition), then is marked 'faded' so renderOrbit stops
+      // drawing it without needing a timer in this module.
+      if (agent.status === 'done') {
+        setTimeout(() => {
+          const current = known.get(sessionId)?.get(agent.agentId);
+          if (current) current.status = 'faded';
+          if (activeSessionId() === sessionId) renderOrbit(known.get(sessionId));
+        }, 2000);
+      }
+    }
+    known.set(sessionId, sessionAgents);
+    updateBadge(sessionId, sessionAgents);
+    if (activeSessionId() === sessionId) renderOrbit(sessionAgents);
+  }
+
+  function sessionOpened(sessionId) {
+    closePopover();
+    renderOrbit(known.get(sessionId) ?? new Map());
+  }
+
+  return { handleEvent, sessionOpened };
+}
