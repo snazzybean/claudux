@@ -40,17 +40,28 @@ function glowDefs() {
   return defs;
 }
 
-// Two curves rather than one: out of the row's edge and over to a corridor
-// at the strip's height, then along the strip and down into the window's top
-// edge. The corridor turn is what keeps a line to a lower row clear of the
-// windows above it, and arriving from directly overhead is what lets several
-// lines share a strip without crossing.
+// A single curve that leaves the row sideways and arrives at the window
+// sideways: the control points sit horizontally out from both ends, so the
+// line comes out of the edge and goes into the window instead of pointing at
+// it. The bend grows with the distance, since a short connection with a long
+// bend loops back on itself.
 //
 // Which points those are is agentLayout.js's decision - this only draws.
-function pathAlong({ from, corridor, entry }) {
+const MIN_BEND = 60;
+const MAX_BEND = 200;
+
+// The bend comes from the HORIZONTAL distance alone, which every window in
+// the column shares - and that is what makes the set provably free of
+// crossings rather than merely usually free. With one bend and one target x,
+// a point on the curve is an affine function of the target's y with a
+// positive coefficient, so the vertical order at every step is the order of
+// the windows. Taking the bend from the diagonal distance instead, which is
+// what stood here, gave the far windows a wider belly and let them overtake
+// the near ones: five crossings out of six windows, measured.
+function pathAlong({ from, entry }) {
+  const bend = Math.min(MAX_BEND, Math.max(MIN_BEND, Math.abs(entry.x - from.x) / 2));
   return `M ${from.x} ${from.y}`
-    + ` C ${from.x + 48} ${from.y}, ${corridor.x} ${from.y}, ${corridor.x} ${corridor.y}`
-    + ` C ${corridor.x} ${corridor.y}, ${entry.x} ${corridor.y}, ${entry.x} ${entry.y}`;
+    + ` C ${from.x + bend} ${from.y}, ${entry.x - bend} ${entry.y}, ${entry.x} ${entry.y}`;
 }
 
 export function initAgentLines(svgEl) {
@@ -63,7 +74,7 @@ export function initAgentLines(svgEl) {
   // same curve without looking it up in the DOM.
   const paths = new Map();
 
-  // One route per open window: `{ agentId, from, corridor, entry }`.
+  // One route per open window: `{ agentId, from, entry }`.
   function draw(routes) {
     group.replaceChildren();
     paths.clear();

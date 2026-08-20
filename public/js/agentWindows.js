@@ -127,12 +127,13 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       // A window that has been dragged keeps its route's strip but arrives
       // where it now is, so the line follows it without leaving the corridor
       // its neighbours use.
+      // A window that has been dragged is met on its left edge where it now
+      // is, so the line follows it without any state to keep in step.
       routes.push({
         agentId: entry.agentId,
         from: anchor,
-        corridor: entry.route.corridor,
         entry: entry.moved
-          ? { x: entry.box.x + (entry.route.entry.x - entry.route.box.x), y: entry.box.y }
+          ? { x: entry.box.x, y: entry.box.y + entry.box.height / 2 }
           : entry.route.entry,
       });
     }
