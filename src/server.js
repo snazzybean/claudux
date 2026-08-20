@@ -173,7 +173,7 @@ export function startServer(config = loadConfig()) {
   const claudeCodeUpdate = startClaudeCodeUpdateInterval(config);
   const app = createApp(config, { claudeCodeUpdateJob: claudeCodeUpdate.job });
   const stopStatusWatcher = startStatusWatcherInterval(config, {
-    onEvents: (list) => list.forEach(app.locals.publishStatus),
+    onEvents: (list) => list.forEach((event) => app.locals.publishStatus(event)),
   });
   const server = app.listen(config.port, config.host, () => {
     console.log(`Claudux is running on ${config.host}:${config.port}`);
