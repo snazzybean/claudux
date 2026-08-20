@@ -82,7 +82,7 @@ test('agentAppearsDone accepts a last assistant turn that only answers', () => {
   const jsonl =
     line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: {} }] } })
     + line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1' }] } })
-    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Here is what I found.' }] } });
+    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Here is what I found.' }], stop_reason: 'end_turn' } });
   assert.equal(agentAppearsDone(jsonl), true);
 });
 
@@ -100,7 +100,7 @@ test('agentAppearsDone rejects a transcript without any assistant entry', () => 
 });
 
 test('agentAppearsDone falls back to the last VALID assistant entry on a broken line', () => {
-  const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } })
+  const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' } })
     + '{"type":"assistant","message":{"con\n';
   assert.equal(agentAppearsDone(jsonl), true);
 });
@@ -197,10 +197,10 @@ test('subagentSnapshot survives a nested agent whose parent transcript is missin
   assert.equal(agentRow.resolved, false);
 });
 
-test('subagentSnapshot resolves a toolUseId-less agent once its own transcript stops calling tools', () => {
+test('subagentSnapshot resolves a toolUseId-less agent once its own transcript ends a turn', () => {
   const { claudeHome, subagentsDir } = sessionFixture();
   writeAgent(subagentsDir, 'slash11', { agentType: 'general-purpose', description: 'Slash command' },
-    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'All done.' }] } }]);
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'All done.' }], stop_reason: 'end_turn' } }]);
   const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
   assert.equal(agentRow.resolved, true);
 });
@@ -577,4 +577,57 @@ test('subagentSnapshot skips an agent id that could leave the subagents director
   // An unusable parent id resolves to nothing rather than reading a path
   // of its choosing.
   assert.equal(snapshot[0].resolved, false);
+});
+
+// The case caught in the browser: an agent reading a file in slices wrote
+// a line of commentary between two Bash calls and was reported done in the
+// middle of its work - and 'done' is sticky, so its node faded and never
+// came back. A turn that has really ended says so in stop_reason.
+test('agentAppearsDone rejects an answer that is still mid-turn', () => {
+  const jsonl =
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] }, stop_reason: 'tool_use' })
+    + line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1' }] } })
+    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Now the next slice.' }], stop_reason: null } });
+  assert.equal(agentAppearsDone(jsonl), false);
+});
+
+test('agentAppearsDone accepts every stop_reason that ends a turn', () => {
+  for (const stop of ['end_turn', 'stop_sequence', 'max_tokens']) {
+    const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'answer' }], stop_reason: stop } });
+    assert.equal(agentAppearsDone(jsonl), true, stop);
+  }
+});
+
+test('subagentSnapshot keeps an id-less agent active while it narrates between tool calls', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  writeAgent(subagentsDir, 'aTokenAudit-f30030d664368b10', { agentType: 'TokenAudit', description: 'Check the scale', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Now the next slice.' }], stop_reason: null } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, false);
+});
+
+// An agent interrupted mid-turn never writes its closing message, so no
+// marker will ever appear - and without a floor its node orbits for the
+// life of the process. A running agent appends on every tool result, so
+// silence on this scale is absence, not thought.
+test('subagentSnapshot counts an agent whose transcript went silent long ago as finished', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  writeAgent(subagentsDir, 'abandoned1', { agentType: 'general-purpose', toolUseId: 'toolu_1' },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }]);
+  const agentPath = path.join(subagentsDir, 'agent-abandoned1.jsonl');
+  const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+  fs.utimesSync(agentPath, longAgo, longAgo);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, true);
 });

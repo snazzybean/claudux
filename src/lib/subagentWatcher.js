@@ -71,13 +71,12 @@ export function currentToolFromAgentTranscript(jsonlText) {
   return tool;
 }
 
-// A subagent's own transcript carries no explicit completion marker, but
-// its agentic loop stops emitting tool_use once it has nothing left to do -
-// the same "no tool_use in the last turn" signal that ends any Claude Code
-// turn. Used only where ID-based resolution isn't possible (no toolUseId,
-// as with a slash-command-spawned agent): the toolUseId paths stay
-// authoritative wherever an id exists, since they don't depend on guessing
-// "no more tool calls are coming" from a file that could still grow.
+// Whether an agent's own transcript ends on a turn that is actually over.
+// Used only where no toolUseId links the agent to a caller (a named agent
+// or a slash-command one); wherever an id exists it stays authoritative,
+// since it does not have to read the end of a file that could still grow.
+const TERMINAL_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens']);
+
 export function agentAppearsDone(jsonlText) {
   let lastAssistant = null;
   for (const rawLine of String(jsonlText ?? '').split('\n')) {
@@ -92,7 +91,14 @@ export function agentAppearsDone(jsonlText) {
   }
   const content = lastAssistant?.message?.content;
   if (!Array.isArray(content) || content.length === 0) return false;
-  return !content.some((block) => block?.type === 'tool_use');
+  if (content.some((block) => block?.type === 'tool_use')) return false;
+  // "No tool_use in the last turn" alone is not enough, and the difference
+  // is the common case rather than the edge: an agent that writes a line
+  // of commentary between two tool calls looks exactly like one that has
+  // answered - and since 'done' is sticky, its node faded mid-work and
+  // never came back. An ended turn says so; a turn still in flight
+  // carries stop_reason null.
+  return TERMINAL_STOP_REASONS.has(lastAssistant.message?.stop_reason);
 }
 
 // An agent spawned under a name carries that name in its id, hyphen
@@ -107,7 +113,16 @@ const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 // three cases rather than one session-wide lookup. `ownTranscript` is the
 // text subagentSnapshot already read for currentTool - null when that read
 // failed, which agentAppearsDone reads as "not done".
-function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker) {
+// Nothing written for this long and the agent is absent rather than
+// thinking: it appends a line on every tool result, and the longest single
+// tool call measured here is minutes. This is the only signal for an agent
+// interrupted mid-turn - it never writes a closing message, and no id will
+// ever be recorded for it either, so without a floor its node orbits for
+// the life of the process.
+const SILENT_DONE_MS = 30 * 60 * 1000;
+
+function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker, silentForMs) {
+  if (silentForMs >= SILENT_DONE_MS) return true;
   // A slash command spawns an agent without a Task call, so there is no id
   // to look for anywhere - its own transcript is the only evidence there is.
   if (!meta.toolUseId) return agentAppearsDone(ownTranscript);
@@ -169,8 +184,11 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
     // it is doing right now and - where no id links it to a caller -
     // whether it has stopped calling tools at all.
     let ownTranscript = null;
+    let silentForMs = 0;
     try {
-      ownTranscript = readTranscriptTail(path.join(dir, `agent-${agentId}.jsonl`));
+      const agentPath = path.join(dir, `agent-${agentId}.jsonl`);
+      silentForMs = Date.now() - fs.statSync(agentPath).mtimeMs;
+      ownTranscript = readTranscriptTail(agentPath);
     } catch {
       // The jsonl hasn't been written yet, or was read mid-write - the
       // agent still shows up, just without a current tool.
@@ -181,7 +199,7 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
       description: meta.description,
       spawnDepth: meta.spawnDepth,
       currentTool: currentToolFromAgentTranscript(ownTranscript),
-      resolved: agentIsResolved(dir, meta, resolved, ownTranscript, tracker),
+      resolved: agentIsResolved(dir, meta, resolved, ownTranscript, tracker, silentForMs),
     });
   }
   return agents;
