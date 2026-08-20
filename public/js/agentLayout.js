@@ -5,8 +5,14 @@
 // windows, which is what makes the shape checkable by importing it in node,
 // and is how the crossings below were counted rather than guessed at.
 //
-// Windows fill rows from the TOP of the screen, so the set always starts in
-// the same place instead of wherever its sidebar row happens to sit.
+// Windows fill rows from the top of the screen, so the set always starts in
+// the same place instead of wherever its sidebar row happens to sit - with one
+// band's worth of room left above the first row, because that is where its
+// lines run.
+//
+// Every band sits ABOVE its row and every line arrives on a window's top edge.
+// Underneath, which was the first attempt, means a line to a window level with
+// the session's row has to travel around the whole window to get in.
 //
 // A route is a list of waypoints, not a curve: out of the row into a corridor
 // lane of its own, along that corridor to its row's band, along the band, and
@@ -54,6 +60,9 @@ function gridFor(anchor, viewport, count) {
   // The corridor carries one lane per LINE, not one per column - reserving
   // only the latter let it reach into the windows, and two lines ran straight
   // through one.
+  // The corridor carries one lane per LINE, not one per column - reserving
+  // only the latter let it reach into the windows, and two lines ran straight
+  // through one.
   return { columns, rows, band, height, left: anchor.x + CORRIDOR + LANE * count + CLEARANCE };
 }
 
@@ -72,7 +81,9 @@ export function layoutFor(agentIds, anchor, viewport) {
     agentId,
     box: {
       x: left + (index % columns) * (WINDOW_WIDTH + GAP),
-      y: GAP + Math.floor(index / columns) * (height + band),
+      // A band above every row, the first one included - that strip is where
+      // the row's lines run.
+      y: GAP + band + Math.floor(index / columns) * (height + band),
       width: WINDOW_WIDTH,
       height,
     },
@@ -88,7 +99,7 @@ export function layoutFor(agentIds, anchor, viewport) {
 // entered the same way. Deciding it per window against the session row's own
 // height put the band above a row that starts at the top of the screen, which
 // is off the screen.
-export function routesFor(boxes, anchor, viewport) {
+export function routesFor(boxes, anchor) {
   const rows = new Map();
   for (const box of boxes) {
     const key = `${Math.round(box.y)}x${Math.round(box.height)}`;
@@ -101,15 +112,17 @@ export function routesFor(boxes, anchor, viewport) {
     members.sort((a, b) => a.x - b.x);
     const [first] = members;
     const need = CLEARANCE + members.length * LANE;
-    const below = first.y + first.height + need <= viewport.height - GAP;
-    const outward = below ? 1 : -1;
-    const bandBase = below ? first.y + first.height + CLEARANCE : first.y - CLEARANCE;
+    // Above, unless a window has been dragged so high that there is no room
+    // left for its band up there.
+    const above = first.y - need >= GAP;
+    const outward = above ? -1 : 1;
+    const bandBase = above ? first.y - CLEARANCE : first.y + first.height + CLEARANCE;
     members.forEach((box, rank) => {
       legs.push({
         box,
         entry: {
           x: box.x + Math.min(ENTRY_INSET, box.width / 2),
-          y: below ? box.y + box.height : box.y,
+          y: above ? box.y : box.y + box.height,
         },
         // The window reached first takes the lane closest to the windows: a
         // line only crosses lanes while turning in, and those belong to

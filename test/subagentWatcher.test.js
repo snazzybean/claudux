@@ -804,3 +804,19 @@ test('runSubagentWatcherOnce leaves an ordinary change without a signal', async 
   });
   assert.equal(events[0].agents[0].signal, null);
 });
+
+// A pulse stands for one message. Derived from the current tool alone the
+// signal fired on every pass for as long as the agent stayed on SendMessage -
+// and since a signal forces an event of its own, that was a pulse every two
+// seconds rather than one per message.
+test('diffSubagents reports a message from an agent once, not for as long as it is sending', () => {
+  const sending = agent({ currentTool: { name: 'SendMessage', input: { to: 'team-lead' } } });
+  const first = diffSubagents(undefined, [sending]);
+  assert.equal(first.events[0].signal, 'toLead');
+
+  const again = diffSubagents(first.next, [sending]);
+  assert.deepEqual(again.events, [], 'still on the same call - nothing new to report');
+
+  const next = diffSubagents(again.next, [agent({ currentTool: { name: 'SendMessage', input: { to: 'team-lead', message: 'zweite' } } })]);
+  assert.equal(next.events[0].signal, 'toLead', 'a second call is a second message');
+});

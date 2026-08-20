@@ -208,9 +208,13 @@ function eventFor(agent, status, signal) {
   };
 }
 
-function signalFor(agent, messaged) {
+// `toLead` has to come from a NEW SendMessage call, not from the agent
+// currently being on one: derived from the state alone it fired on every pass
+// for as long as the tool stayed put - and since a signal forces an event of
+// its own, that was a pulse every two seconds instead of one per message.
+function signalFor(agent, messaged, priorToolKey, toolKey) {
   if (agent.name && messaged?.has(agent.name)) return 'toAgent';
-  if (agent.currentTool?.name === 'SendMessage') return 'toLead';
+  if (agent.currentTool?.name === 'SendMessage' && priorToolKey !== toolKey) return 'toLead';
   return null;
 }
 
@@ -238,7 +242,7 @@ export function diffSubagents(previous, snapshot, messaged) {
     // event that only fires when the status or the current tool changes, so a
     // message reaching an agent that stayed on the same tool produced nothing
     // at all - which is every message to an agent waiting on a long call.
-    const signal = signalFor(a, messaged);
+    const signal = signalFor(a, messaged, prior?.toolKey, toolKey);
     // Once an agent is done its own file writes nothing further - comparing
     // toolKey there would only ever compare against itself.
     // A first sighting that is already done is not news: no client has
