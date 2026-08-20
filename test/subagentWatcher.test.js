@@ -770,3 +770,34 @@ test('subagentSnapshot credits a team entry to the newest agent of that name onl
   assert.equal(byId.get('aVermessung-1111111111111111').resolved, true);
   assert.equal(byId.get('aVermessung-2222222222222222').resolved, false);
 });
+
+// The registry answers whether a teammate still exists, not whether it is
+// still working: one that has delivered its answer stays a member and waits
+// for another task (its own notification calls that "available"). So the
+// registry alone reported every finished agent as running - measured here,
+// the four that were stopped went away and the two that finished by
+// themselves did not.
+test('subagentSnapshot counts a named agent as finished once its own turn has ended', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  teamFixture(claudeHome, 'session-abc', ['team-lead', 'Kommentare']);
+  writeAgent(subagentsDir, 'aKommentare-99808aacae0eb4b4',
+    { agentType: 'Kommentare', name: 'Kommentare', teamName: 'session-abc', taskKind: 'in_process_teammate', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Here is the table.' }], stop_reason: 'end_turn' } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, true);
+});
+
+// The other half of the same pair: still a member AND still mid-turn is the
+// only combination that means running.
+test('subagentSnapshot keeps a named agent active while it is a member and mid-turn', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  teamFixture(claudeHome, 'session-abc', ['team-lead', 'Kommentare']);
+  writeAgent(subagentsDir, 'aKommentare-99808aacae0eb4b4',
+    { agentType: 'Kommentare', name: 'Kommentare', teamName: 'session-abc', taskKind: 'in_process_teammate', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'Now the next file.' }], stop_reason: null } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, false);
+});

@@ -134,12 +134,15 @@ function agentIsResolved(claudeHome, dir, meta, sessionResolved, ownTranscript, 
   // A newer agent carries this one's name now, so the team's entry is not
   // about this instance - and a team never holds two of a name at once.
   if (superseded) return true;
-  // A named agent records no tool_result anywhere, so its own transcript
-  // used to be the only evidence - and "no tool_use in the last turn"
-  // cannot tell an answer from a remark between two tool calls. The team
-  // registry can: Claude Code lists a teammate while it runs and drops it
-  // the moment it stops, finished or aborted alike.
+  // A named agent records no tool_result anywhere, so its two signals are
+  // its team's registry and its own transcript - and each covers the
+  // other's blind spot. Gone from the registry means stopped or killed,
+  // which leaves no closing message behind. An ended turn in its own
+  // transcript means it has answered - and it stays a team member after
+  // that, waiting for another task, so the registry alone reported every
+  // finished agent as running.
   if (meta.name && meta.teamName) {
+    if (agentAppearsDone(ownTranscript)) return true;
     const live = liveTeamMembers(claudeHome, meta.teamName);
     // null means the registry could not be read, not that the team is
     // empty - only a readable one may be taken as evidence.
