@@ -38,6 +38,9 @@ export function parseAgentMeta(rawJson) {
     agentType: raw.agentType,
     description: typeof raw.description === 'string' ? raw.description : '',
     toolUseId: typeof raw.toolUseId === 'string' ? raw.toolUseId : null,
+    // Set only for a NESTED agent - it names the agent that spawned this
+    // one, and thus the transcript that will carry its tool_result.
+    parentAgentId: typeof raw.parentAgentId === 'string' ? raw.parentAgentId : null,
     spawnDepth: Number.isFinite(raw.spawnDepth) ? raw.spawnDepth : 1,
   };
 }
@@ -67,10 +70,33 @@ export function currentToolFromAgentTranscript(jsonlText) {
   return tool;
 }
 
-// A subagent's own transcript carries no completion marker - the only
-// reliable "it's done" signal is the PARENT session recording a tool_result
-// for the Task call's toolUseId. Collected from every user-role line, not
-// just the last one: several subagents can resolve within the same tick.
+// A subagent's own transcript carries no explicit completion marker, but
+// its agentic loop stops emitting tool_use once it has nothing left to do -
+// the same "no tool_use in the last turn" signal that ends any Claude Code
+// turn. Used only where ID-based resolution isn't possible (no toolUseId,
+// as with a slash-command-spawned agent): the toolUseId paths stay
+// authoritative wherever an id exists, since they don't depend on guessing
+// "no more tool calls are coming" from a file that could still grow.
+export function agentAppearsDone(jsonlText) {
+  let lastAssistant = null;
+  for (const rawLine of String(jsonlText ?? '').split('\n')) {
+    if (!rawLine.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+    if (entry?.type === 'assistant') lastAssistant = entry;
+  }
+  const content = lastAssistant?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) return false;
+  return !content.some((block) => block?.type === 'tool_use');
+}
+
+// The reliable "it's done" signal wherever a toolUseId exists: the caller
+// recording a tool_result for the Task call. Collected from every user-role
+// line, not just the last one: several subagents can resolve in one tick.
 export function resolvedToolUseIds(transcriptText) {
   const ids = new Set();
   for (const rawLine of String(transcriptText ?? '').split('\n')) {
@@ -94,6 +120,29 @@ export function resolvedToolUseIds(transcriptText) {
 }
 
 const AGENT_META_RE = /^agent-([a-zA-Z0-9]+)\.meta\.json$/;
+
+// Where an agent's completion is recorded depends on who spawned it, so
+// three cases rather than one session-wide lookup. `ownTranscript` is the
+// text subagentSnapshot already read for currentTool - null when that read
+// failed, which agentAppearsDone reads as "not done".
+function agentIsResolved(dir, meta, sessionResolved, ownTranscript) {
+  // A slash command spawns an agent without a Task call, so there is no id
+  // to look for anywhere - its own transcript is the only evidence there is.
+  if (!meta.toolUseId) return agentAppearsDone(ownTranscript);
+  // A nested agent's tool_result lands in the transcript of the AGENT that
+  // spawned it, never in the session's own.
+  if (meta.parentAgentId) {
+    try {
+      const parentPath = path.join(dir, `agent-${meta.parentAgentId}.jsonl`);
+      return resolvedToolUseIds(readTranscriptTail(parentPath)).has(meta.toolUseId);
+    } catch {
+      // Parent file missing (an orphaned meta) or read mid-write - not
+      // resolved yet, and never a reason to lose the whole snapshot.
+      return false;
+    }
+  }
+  return sessionResolved.has(meta.toolUseId);
+}
 
 // One snapshot of every subagent currently on disk for a session - no
 // history, no diffing. `sessionIds` are every id the tmux session may have
@@ -130,9 +179,12 @@ export function subagentSnapshot(claudeHome, sessionIds) {
       continue;
     }
     if (!meta) continue;
-    let currentTool = null;
+    // Read once, used twice: the agent's own transcript answers both what
+    // it is doing right now and - where no id links it to a caller -
+    // whether it has stopped calling tools at all.
+    let ownTranscript = null;
     try {
-      currentTool = currentToolFromAgentTranscript(readTranscriptTail(path.join(dir, `agent-${agentId}.jsonl`)));
+      ownTranscript = readTranscriptTail(path.join(dir, `agent-${agentId}.jsonl`));
     } catch {
       // The jsonl hasn't been written yet, or was read mid-write - the
       // agent still shows up, just without a current tool.
@@ -142,8 +194,8 @@ export function subagentSnapshot(claudeHome, sessionIds) {
       agentType: meta.agentType,
       description: meta.description,
       spawnDepth: meta.spawnDepth,
-      currentTool,
-      resolved: meta.toolUseId ? resolved.has(meta.toolUseId) : false,
+      currentTool: currentToolFromAgentTranscript(ownTranscript),
+      resolved: agentIsResolved(dir, meta, resolved, ownTranscript),
     });
   }
   return agents;
@@ -174,9 +226,15 @@ export function diffSubagents(previous, snapshot) {
   const next = new Map();
   const events = [];
   for (const a of snapshot) {
-    const status = a.resolved ? 'done' : 'active';
-    const toolKey = toolKeyOf(a);
     const prior = previousMap.get(a.agentId);
+    // Sticky once done. resolvedToolUseIds only sees the last 64 kB of the
+    // transcript, so a session with many finished subagents eventually
+    // scrolls an agent's tool_result out of that window and reports it
+    // unresolved again - without the memory of the prior tick the agent
+    // would flip back to 'active' and stay there. Nothing can legitimately
+    // un-resolve an agent: its own file writes nothing more once it's done.
+    const status = a.resolved || prior?.status === 'done' ? 'done' : 'active';
+    const toolKey = toolKeyOf(a);
     // Once an agent is done its own file writes nothing further - comparing
     // toolKey there would only ever compare against itself.
     const changed = !prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey);

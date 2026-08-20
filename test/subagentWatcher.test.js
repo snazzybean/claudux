@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { setMeta } from '../src/lib/sessionMeta.js';
-import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
+import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, agentAppearsDone, resolvedToolUseIds, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
 
 // Claude Code writes a session's own transcript at
 // <projectDir>/<sessionId>.jsonl and its subagents' transcripts at
@@ -22,7 +22,7 @@ test('subagentsDirFor returns null without a transcript path', () => {
   assert.equal(subagentsDirFor(null), null);
 });
 
-test('parseAgentMeta reads agentType, description, toolUseId, and spawnDepth', () => {
+test('parseAgentMeta reads agentType, description, toolUseId, parentAgentId, and spawnDepth', () => {
   const raw = JSON.stringify({
     agentType: 'general-purpose',
     description: 'Angle Efficiency',
@@ -34,16 +34,18 @@ test('parseAgentMeta reads agentType, description, toolUseId, and spawnDepth', (
     agentType: 'general-purpose',
     description: 'Angle Efficiency',
     toolUseId: 'toolu_01Bu4gHiR5R22yqLC6sRSyGa',
+    parentAgentId: 'a19c417324c2ebbb8',
     spawnDepth: 2,
   });
 });
 
-test('parseAgentMeta defaults a missing description and spawnDepth', () => {
+test('parseAgentMeta defaults a missing description and spawnDepth, and a top-level agent has no parent', () => {
   const raw = JSON.stringify({ agentType: 'code-review', toolUseId: 'toolu_1' });
   assert.deepEqual(parseAgentMeta(raw), {
     agentType: 'code-review',
     description: '',
     toolUseId: 'toolu_1',
+    parentAgentId: null,
     spawnDepth: 1,
   });
 });
@@ -74,6 +76,33 @@ test('currentToolFromAgentTranscript skips broken lines', () => {
   const jsonl = line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Grep', input: {} }] } })
     + '{ half a line\n';
   assert.deepEqual(currentToolFromAgentTranscript(jsonl), { name: 'Grep', input: {} });
+});
+
+test('agentAppearsDone accepts a last assistant turn that only answers', () => {
+  const jsonl =
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: {} }] } })
+    + line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1' }] } })
+    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Here is what I found.' }] } });
+  assert.equal(agentAppearsDone(jsonl), true);
+});
+
+test('agentAppearsDone rejects a last assistant turn that still calls a tool', () => {
+  const jsonl =
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Let me look.' }] } })
+    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', name: 'Bash', input: {} }] } });
+  assert.equal(agentAppearsDone(jsonl), false);
+});
+
+test('agentAppearsDone rejects a transcript without any assistant entry', () => {
+  assert.equal(agentAppearsDone(line({ type: 'user', message: { content: [] } })), false);
+  assert.equal(agentAppearsDone(''), false);
+  assert.equal(agentAppearsDone(null), false);
+});
+
+test('agentAppearsDone falls back to the last VALID assistant entry on a broken line', () => {
+  const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } })
+    + '{"type":"assistant","message":{"con\n';
+  assert.equal(agentAppearsDone(jsonl), true);
 });
 
 test('resolvedToolUseIds collects tool_use_id from tool_result blocks', () => {
@@ -131,6 +160,77 @@ test('subagentSnapshot marks an agent resolved once the parent transcript carrie
 
   const [agent] = subagentSnapshot(claudeHome, ['sess-1']);
   assert.equal(agent.resolved, true);
+});
+
+// A session whose transcript and subagents directory both exist, ready for
+// agents to be written into it.
+function sessionFixture(transcriptLines = []) {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), transcriptLines.map(line).join(''));
+  return { claudeHome, subagentsDir };
+}
+
+function toolResult(toolUseId) {
+  return { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'ok' }] } };
+}
+
+test('subagentSnapshot resolves a nested agent from its PARENT agent transcript', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  // The parent's own Task call is still open in the session transcript -
+  // only the parent's transcript carries the nested agent's tool_result.
+  writeAgent(subagentsDir, 'parent1', { agentType: 'general-purpose', toolUseId: 'toolu_parent' },
+    [toolResult('toolu_nested')]);
+  writeAgent(subagentsDir, 'nested1',
+    { agentType: 'code-review', toolUseId: 'toolu_nested', parentAgentId: 'parent1', spawnDepth: 2 }, []);
+
+  const byId = new Map(subagentSnapshot(claudeHome, ['sess-1']).map((a) => [a.agentId, a]));
+  assert.equal(byId.get('nested1').resolved, true);
+  assert.equal(byId.get('parent1').resolved, false);
+});
+
+test('subagentSnapshot leaves a nested agent unresolved when only the session transcript has a tool_result', () => {
+  const { claudeHome, subagentsDir } = sessionFixture([toolResult('toolu_nested'), toolResult('toolu_other')]);
+  writeAgent(subagentsDir, 'parent1', { agentType: 'general-purpose', toolUseId: 'toolu_parent' }, []);
+  writeAgent(subagentsDir, 'nested1',
+    { agentType: 'code-review', toolUseId: 'toolu_nested', parentAgentId: 'parent1', spawnDepth: 2 }, []);
+
+  const byId = new Map(subagentSnapshot(claudeHome, ['sess-1']).map((a) => [a.agentId, a]));
+  assert.equal(byId.get('nested1').resolved, false,
+    'a nested tool_use_id in the SESSION transcript belongs to some other call, not to this agent');
+});
+
+test('subagentSnapshot survives a nested agent whose parent transcript is missing', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  writeAgent(subagentsDir, 'nested1',
+    { agentType: 'code-review', toolUseId: 'toolu_nested', parentAgentId: 'gone999', spawnDepth: 2 }, []);
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, false);
+});
+
+test('subagentSnapshot resolves a toolUseId-less agent once its own transcript stops calling tools', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  writeAgent(subagentsDir, 'slash11', { agentType: 'general-purpose', description: 'Slash command' },
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'All done.' }] } }]);
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, true);
+});
+
+test('subagentSnapshot leaves a toolUseId-less agent active while its transcript still calls tools', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  writeAgent(subagentsDir, 'slash11', { agentType: 'general-purpose', description: 'Slash command' },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Grep', input: { pattern: 'x' } }] } }]);
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, false);
+});
+
+test('subagentSnapshot skips a meta.json that parses but names no agentType', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  fs.writeFileSync(path.join(subagentsDir, 'agent-ddd444.meta.json'), JSON.stringify({ description: 'no type' }));
+  writeAgent(subagentsDir, 'aaa111', { agentType: 'general-purpose', toolUseId: 'toolu_1' }, []);
+  assert.deepEqual(subagentSnapshot(claudeHome, ['sess-1']).map((a) => a.agentId), ['aaa111']);
 });
 
 test('subagentSnapshot returns an empty list without a subagents directory', () => {
@@ -194,6 +294,20 @@ test('diffSubagents reports the transition to done exactly once', () => {
   // 'done' agents from `next` instead of keeping them would see no `prior`
   // on this third tick and re-report 'done' as if the agent were new again.
   const third = diffSubagents(second.next, [agent({ resolved: true })]);
+  assert.deepEqual(third.events, []);
+});
+
+test('diffSubagents keeps an agent done after its tool_result scrolls out of the tail window', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const second = diffSubagents(first.next, [agent({ resolved: true })]);
+  assert.equal(second.events[0].status, 'done');
+
+  // readTranscriptTail only reads the last 64 kB, so a session with many
+  // finished subagents eventually pushes an agent's tool_result out of the
+  // window - the snapshot then reports resolved:false for an agent that
+  // was correctly marked done ticks ago.
+  const third = diffSubagents(second.next, [agent({ resolved: false })]);
+  assert.equal(third.next.get('aaa111').status, 'done');
   assert.deepEqual(third.events, []);
 });
 
