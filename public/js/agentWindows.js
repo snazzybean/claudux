@@ -12,7 +12,7 @@
 // motion.js - three things that were in here and each grew a name of their
 // own.
 import { svg } from './icons.js';
-import { layoutFor, layoutCapacity, clampBox } from './agentLayout.js';
+import { layoutFor, layoutCapacity, clampBox, stubFor, trunkFor } from './agentLayout.js';
 import { initAgentLines } from './agentLines.js';
 import { boxOf, flipFrom, springEasing, staggerDelay } from './motion.js';
 
@@ -52,6 +52,15 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
 
   function entriesOf(sessionId) {
     return [...open.values()].filter((entry) => entry.sessionId === sessionId);
+  }
+
+  function bySession() {
+    const grouped = new Map();
+    for (const entry of open.values()) {
+      if (!grouped.has(entry.sessionId)) grouped.set(entry.sessionId, []);
+      grouped.get(entry.sessionId).push(entry);
+    }
+    return grouped;
   }
 
   // ---------- what is inside ----------
@@ -120,24 +129,19 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       lines.clear();
       return;
     }
-    const routes = [];
-    for (const entry of open.values()) {
-      const anchor = anchorOf(entry.sessionId);
-      if (!anchor || !entry.route) continue;
-      // A window that has been dragged keeps its route's strip but arrives
-      // where it now is, so the line follows it without leaving the corridor
-      // its neighbours use.
-      // A window that has been dragged is met on its left edge where it now
-      // is, so the line follows it without any state to keep in step.
-      routes.push({
-        agentId: entry.agentId,
-        from: anchor,
-        entry: entry.moved
-          ? { x: entry.box.x, y: entry.box.y + entry.box.height / 2 }
-          : entry.route.entry,
+    // Read from the boxes as they are right now rather than from the layout:
+    // a window dragged anywhere - including across the trunk, which flips
+    // which edge it is met on - takes its stub along, with no state to keep
+    // in step.
+    for (const [sessionId, entries] of bySession()) {
+      const anchor = anchorOf(sessionId);
+      const placed = entries.filter((entry) => entry.box);
+      if (!anchor || placed.length === 0) continue;
+      lines.draw({
+        trunk: trunkFor(placed.map((entry) => entry.box), anchor),
+        stubs: placed.map((entry) => ({ agentId: entry.agentId, ...stubFor(entry.box, anchor) })),
       });
     }
-    lines.draw(routes);
   }
 
   // Re-places every window of a session that has not been moved by hand, and
@@ -151,7 +155,6 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     const before = animate ? mine.map((entry) => boxOf(entry.el)) : null;
     const placed = layoutFor(mine.map((entry) => entry.agentId), anchor, viewport());
     mine.forEach((entry, index) => {
-      entry.route = { ...placed[index].route, box: placed[index].box };
       applyBox(entry, clampBox(placed[index].box, viewport()));
       if (before) flipFrom(entry.el, before[index], { durationMs: OPEN_MS, easing: spring });
     });
@@ -198,7 +201,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     el.querySelector('.agent-window-title').textContent = [agent.agentType, agent.description].filter(Boolean).join(' · ');
     containerEl.appendChild(el);
 
-    const entry = { el, agentId: agent.agentId, sessionId, offset: 0, box: null, route: null, moved: false, closing: false };
+    const entry = { el, agentId: agent.agentId, sessionId, offset: 0, box: null, moved: false, closing: false };
     open.set(agent.agentId, entry);
 
     if (anchorOf(sessionId) && !narrow()) {

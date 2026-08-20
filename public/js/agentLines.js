@@ -40,28 +40,28 @@ function glowDefs() {
   return defs;
 }
 
-// A single curve that leaves the row sideways and arrives at the window
-// sideways: the control points sit horizontally out from both ends, so the
-// line comes out of the edge and goes into the window instead of pointing at
-// it. The bend grows with the distance, since a short connection with a long
-// bend loops back on itself.
+// The trunk is one straight line out of the session's row; a stub is a
+// branch off it that turns into the window's near edge. Horizontal out of the
+// trunk and vertical into the window, so it reads as a cable coming off a
+// tray rather than as a diagonal pointing at something.
 //
 // Which points those are is agentLayout.js's decision - this only draws.
-const MIN_BEND = 60;
-const MAX_BEND = 200;
+function trunkPath({ from, to }) {
+  return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
+}
 
-// The bend comes from the HORIZONTAL distance alone, which every window in
-// the column shares - and that is what makes the set provably free of
-// crossings rather than merely usually free. With one bend and one target x,
-// a point on the curve is an affine function of the target's y with a
-// positive coefficient, so the vertical order at every step is the order of
-// the windows. Taking the bend from the diagonal distance instead, which is
-// what stood here, gave the far windows a wider belly and let them overtake
-// the near ones: five crossings out of six windows, measured.
-function pathAlong({ from, entry }) {
-  const bend = Math.min(MAX_BEND, Math.max(MIN_BEND, Math.abs(entry.x - from.x) / 2));
-  return `M ${from.x} ${from.y}`
-    + ` C ${from.x + bend} ${from.y}, ${entry.x - bend} ${entry.y}, ${entry.x} ${entry.y}`;
+function stubPath({ branch, entry, above }) {
+  const rise = above ? -1 : 1;
+  const reach = Math.max(24, Math.abs(entry.y - branch.y) / 2);
+  return `M ${branch.x} ${branch.y}`
+    + ` C ${branch.x + reach} ${branch.y}, ${entry.x} ${entry.y - rise * reach}, ${entry.x} ${entry.y}`;
+}
+
+// What a pulse travels: out along the trunk to this window's branch, then up
+// or down its stub. One path, so the dot never jumps between two.
+function pulsePath(trunk, stub) {
+  return `M ${trunk.from.x} ${trunk.from.y} L ${stub.branch.x} ${stub.branch.y}`
+    + stubPath(stub).slice(stubPath(stub).indexOf(' C'));
 }
 
 export function initAgentLines(svgEl) {
@@ -74,14 +74,17 @@ export function initAgentLines(svgEl) {
   // same curve without looking it up in the DOM.
   const paths = new Map();
 
-  // One route per open window: `{ agentId, from, entry }`.
-  function draw(routes) {
+  // The trunk plus one stub per open window. A pulse gets the whole way from
+  // the row to its window, which is neither of the drawn paths - hence the
+  // third one, kept but not rendered.
+  function draw({ trunk, stubs }) {
     group.replaceChildren();
     paths.clear();
-    for (const route of routes) {
-      const d = pathAlong(route);
-      group.appendChild(element('path', { d, class: 'agent-line' }));
-      paths.set(route.agentId, d);
+    if (!trunk || stubs.length === 0) return;
+    group.appendChild(element('path', { d: trunkPath(trunk), class: 'agent-line agent-trunk' }));
+    for (const stub of stubs) {
+      group.appendChild(element('path', { d: stubPath(stub), class: 'agent-line' }));
+      paths.set(stub.agentId, pulsePath(trunk, stub));
     }
   }
 
