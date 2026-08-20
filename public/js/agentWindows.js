@@ -236,6 +236,15 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     for (const agentId of [...open.keys()]) closeWindow(agentId);
   }
 
+  // A window whose row is gone - the session was ended, or the list no
+  // longer shows it - has nothing left to belong to. Called after a list
+  // rebuild, since no stream event reports a session's disappearance.
+  function pruneMissingRows() {
+    for (const [agentId, entry] of [...open]) {
+      if (!anchorOf(entry.sessionId)) closeWindow(agentId);
+    }
+  }
+
   window.addEventListener('resize', () => {
     for (const entry of open.values()) place(entry);
     drawLines();
@@ -243,5 +252,5 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   // The anchor moves with the list, so the curves have to follow it.
   sidebarEl?.addEventListener('scroll', drawLines, { passive: true });
 
-  return { toggle, noteDelta, closeAll, openCount: () => open.size };
+  return { toggle, noteDelta, closeAll, pruneMissingRows, openCount: () => open.size };
 }

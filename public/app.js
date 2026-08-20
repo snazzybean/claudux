@@ -12,11 +12,8 @@ import {
   accountBadgeEl,
   usagePopoverEl,
   usageBackdropEl,
-  subagentOrbitEl,
   agentWindowsEl,
   agentLinesEl,
-  subagentPopoverEl,
-  subagentBackdropEl,
   tabTerminalEl,
   tabFilesEl,
   backBtnEl,
@@ -368,16 +365,9 @@ function updateProjectBusy() {
   }
 }
 
-// activeSessionId() wraps openSessionId(), reused rather than duplicated,
-// so initSubagents gets a zero-arg getter. Named activeSessionId, not
-// openSessionId, so the parameter at the call site doesn't read as
-// invoking the module-scope function of that name (public/app.js:833).
-const subagents = initSubagents({
-  orbitEl: subagentOrbitEl,
-  popoverEl: subagentPopoverEl,
-  backdropEl: subagentBackdropEl,
-  activeSessionId: () => openSessionId(currentProject?.sessions ?? []),
-});
+// Nothing from here: the edge it drives is found by session id, and the
+// row it sits on is rebuilt by render() below.
+const subagents = initSubagents();
 
 const agentWindows = initAgentWindows({
   containerEl: agentWindowsEl,
@@ -400,7 +390,11 @@ const eventSource = startEventStream(
 );
 
 if (new URLSearchParams(location.search).get('debug') === 'subagents') {
-  startSubagentDebug({ source: eventSource, orbitEl: subagentOrbitEl, activeSessionId: activeSessionIdForDebug });
+  startSubagentDebug({
+    source: eventSource,
+    openWindowCount: () => agentWindows.openCount(),
+    activeSessionId: activeSessionIdForDebug,
+  });
 }
 
 async function refreshProjectSessions(project) {
@@ -687,9 +681,6 @@ function closeOpenTerminal() {
   currentSessionId = null;
   currentLoginSessionId = null;
   currentProject = null;
-  // The orbit belongs to the session that just went away - nothing else
-  // would ever clear it, since the stream only reports changes.
-  subagents.close();
   terminalFrameEl.removeAttribute('src');
   updateAccountBadge(null);
   updateAuthBanner(null);
@@ -1382,6 +1373,9 @@ function render(filter) {
   // back. Same idiom as the activity dots, which buildSessionRow reads out
   // of measuredActivity for exactly this reason.
   subagents.refreshEdges();
+  // The rebuilt list may no longer have a row for a session whose windows
+  // are open, and nothing in the stream reports that.
+  agentWindows.pruneMissingRows();
   updateOnboardingWizard(allAccounts(), projects);
   // What's on screen right now - the background tick compares against this.
   lastSignature = sessionSignature();
@@ -1544,7 +1538,6 @@ function openSession(project, session) {
   usage?.close();
   currentProject = project;
   currentSessionId = session.id;
-  subagents.sessionOpened(session.id);
   currentLoginSessionId = null; // a real session replaces the login terminal
   // The signpost belongs to the login terminal, not to the panel: over an
   // ordinary session it would point at a process that isn't running here.
@@ -1578,9 +1571,10 @@ function openLoginTerminal(terminalUrl) {
   // the only place the frontend learns it from. Without it, the text view
   // would show nothing, of all places on the login terminal.
   currentLoginSessionId = new URL(terminalUrl, location.origin).searchParams.get('arg');
-  // A login terminal has no session, and thus neither usage nor subagents.
+  // A login terminal has no session, and thus no usage numbers. The agent
+  // windows are not tied to the terminal at all - they belong to their
+  // sidebar row and stay where they are.
   usage?.close();
-  subagents.close();
   terminalFrameEl.src = withTerminalOptions(terminalUrl);
   // The account pill names the terminal's context, and a login terminal has
   // no account it would otherwise show - so the label goes there.
@@ -1646,7 +1640,6 @@ overlayMenuReleaseEl.addEventListener('click', () => {
   closeOverlayMenu();
   if (currentSessionId) reportPresence(false);
   usage?.close();
-  subagents.close();
   releaseTerminal();
   currentSessionId = null;
   currentLoginSessionId = null; // the iframe now shows about:blank
