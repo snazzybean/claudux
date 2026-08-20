@@ -16,8 +16,19 @@ import { svg } from './icons.js';
 // Six at once. Beyond that the terminal disappears behind windows - one
 // session in this project's own history had 46 agents in its directory.
 const MAX_WINDOWS = 6;
-const CASCADE_STEP = 24;
+// Far enough from the edge that the curve between them is visible - the
+// lines sit under the windows, so a window starting right at its anchor
+// hides its own line.
+const CASCADE_START_X = 96;
+const CASCADE_STEP_X = 28;
+// Bigger than the title bar, so the bar of every window behind stays
+// readable - the point of a cascade.
+const CASCADE_STEP_Y = 38;
 const WINDOW_WIDTH = 360;
+// A finished agent's window stays long enough to see that it finished, and
+// to take in its last lines, then retracts by itself. Leaving it would fill
+// the screen with windows that nothing is happening in any more.
+const CLOSE_AFTER_DONE_MS = 4000;
 // Below this the sidebar is collapsed, so there is no edge for a line to
 // reach and no room to place a window by hand - they stack instead. Same
 // breakpoint every other narrow rule in styles.css uses.
@@ -137,8 +148,8 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       el,
       sessionId,
       offset: 0,
-      x: (anchor?.x ?? 0) + CASCADE_STEP + index * CASCADE_STEP,
-      y: (anchor?.y ?? 0) + index * CASCADE_STEP,
+      x: (anchor?.x ?? 0) + CASCADE_START_X + index * CASCADE_STEP_X,
+      y: (anchor?.y ?? 0) + index * CASCADE_STEP_Y,
     };
     open.set(agent.agentId, entry);
     place(entry);
@@ -225,11 +236,34 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   }
 
   function noteDelta(sessionId, agents) {
+    const showing = [...open.values()].filter((entry) => entry.sessionId === sessionId).length;
+    let placed = showing;
     for (const agent of agents) {
-      if (!open.has(agent.agentId)) continue;
-      loadInto(open.get(agent.agentId), agent.agentId);
-      pulse(agent.agentId);
+      if (open.has(agent.agentId)) {
+        const entry = open.get(agent.agentId);
+        loadInto(entry, agent.agentId);
+        pulse(agent.agentId);
+        if (agent.status !== 'active') markDone(entry, agent.agentId);
+        continue;
+      }
+      // An agent that starts while this session's windows are open gets one
+      // too. Without this, only what was running at the moment of the click
+      // ever appeared, and the next agent stayed invisible behind a count
+      // that had already gone up.
+      if (showing > 0 && agent.status === 'active' && placed < MAX_WINDOWS) {
+        openWindow(sessionId, agent, placed);
+        placed += 1;
+      }
     }
+  }
+
+  function markDone(entry, agentId) {
+    if (entry.closing) return;
+    entry.closing = true;
+    entry.el.classList.add('agent-window-done');
+    const title = entry.el.querySelector('.agent-window-title');
+    title.textContent = `${title.textContent} · finished`;
+    setTimeout(() => closeWindow(agentId), CLOSE_AFTER_DONE_MS);
   }
 
   function closeAll() {
