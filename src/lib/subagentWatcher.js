@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chooseTranscript, readTranscriptTail } from './contextUsage.js';
+import { createResolvedTracker } from './resolvedIds.js';
 import { readRegistry, reconcile } from './sessionRegistry.js';
 import { listTmuxSessions, aliveSessionNames } from './tmuxManager.js';
 import { getMeta, claudeSessionIdsForTmux } from './sessionMeta.js';
@@ -94,47 +95,23 @@ export function agentAppearsDone(jsonlText) {
   return !content.some((block) => block?.type === 'tool_use');
 }
 
-// The reliable "it's done" signal wherever a toolUseId exists: the caller
-// recording a tool_result for the Task call. Collected from every user-role
-// line, not just the last one: several subagents can resolve in one tick.
-export function resolvedToolUseIds(transcriptText) {
-  const ids = new Set();
-  for (const rawLine of String(transcriptText ?? '').split('\n')) {
-    if (!rawLine.trim()) continue;
-    let entry;
-    try {
-      entry = JSON.parse(rawLine);
-    } catch {
-      continue;
-    }
-    if (entry?.type !== 'user') continue;
-    const content = entry.message?.content;
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-        ids.add(block.tool_use_id);
-      }
-    }
-  }
-  return ids;
-}
-
 const AGENT_META_RE = /^agent-([a-zA-Z0-9]+)\.meta\.json$/;
 
 // Where an agent's completion is recorded depends on who spawned it, so
 // three cases rather than one session-wide lookup. `ownTranscript` is the
 // text subagentSnapshot already read for currentTool - null when that read
 // failed, which agentAppearsDone reads as "not done".
-function agentIsResolved(dir, meta, sessionResolved, ownTranscript) {
+function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker) {
   // A slash command spawns an agent without a Task call, so there is no id
   // to look for anywhere - its own transcript is the only evidence there is.
   if (!meta.toolUseId) return agentAppearsDone(ownTranscript);
   // A nested agent's tool_result lands in the transcript of the AGENT that
-  // spawned it, never in the session's own.
+  // spawned it, never in the session's own - measured: 0 of 8 nested agents
+  // were resolvable from the session file, all 8 from their parent's.
   if (meta.parentAgentId) {
     try {
       const parentPath = path.join(dir, `agent-${meta.parentAgentId}.jsonl`);
-      return resolvedToolUseIds(readTranscriptTail(parentPath)).has(meta.toolUseId);
+      return tracker.idsFor(parentPath).has(meta.toolUseId);
     } catch {
       // Parent file missing (an orphaned meta) or read mid-write - not
       // resolved yet, and never a reason to lose the whole snapshot.
@@ -148,7 +125,7 @@ function agentIsResolved(dir, meta, sessionResolved, ownTranscript) {
 // history, no diffing. `sessionIds` are every id the tmux session may have
 // carried across a /clear (see contextUsage.chooseTranscript) - subagents
 // belong to whichever file is the CURRENT one.
-export function subagentSnapshot(claudeHome, sessionIds) {
+export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolvedTracker()) {
   const transcriptPath = chooseTranscript(claudeHome, sessionIds);
   const dir = subagentsDirFor(transcriptPath);
   if (!dir) return [];
@@ -162,7 +139,7 @@ export function subagentSnapshot(claudeHome, sessionIds) {
   }
   let resolved;
   try {
-    resolved = resolvedToolUseIds(readTranscriptTail(transcriptPath));
+    resolved = tracker.idsFor(transcriptPath);
   } catch {
     resolved = new Set();
   }
@@ -195,7 +172,7 @@ export function subagentSnapshot(claudeHome, sessionIds) {
       description: meta.description,
       spawnDepth: meta.spawnDepth,
       currentTool: currentToolFromAgentTranscript(ownTranscript),
-      resolved: agentIsResolved(dir, meta, resolved, ownTranscript),
+      resolved: agentIsResolved(dir, meta, resolved, ownTranscript, tracker),
     });
   }
   return agents;
@@ -227,17 +204,19 @@ export function diffSubagents(previous, snapshot) {
   const events = [];
   for (const a of snapshot) {
     const prior = previousMap.get(a.agentId);
-    // Sticky once done. resolvedToolUseIds only sees the last 64 kB of the
-    // transcript, so a session with many finished subagents eventually
-    // scrolls an agent's tool_result out of that window and reports it
-    // unresolved again - without the memory of the prior tick the agent
-    // would flip back to 'active' and stay there. Nothing can legitimately
-    // un-resolve an agent: its own file writes nothing more once it's done.
+    // Sticky once done: nothing can legitimately un-resolve an agent, since
+    // its own file writes nothing more once it's finished. Kept as a floor
+    // under the resolution in resolvedIds.js rather than as its fallback.
     const status = a.resolved || prior?.status === 'done' ? 'done' : 'active';
     const toolKey = toolKeyOf(a);
     // Once an agent is done its own file writes nothing further - comparing
     // toolKey there would only ever compare against itself.
-    const changed = !prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey);
+    // A first sighting that is already done is not news: no client has
+    // ever heard of this agent, so there is no node to take away. Every
+    // restart reads a session's finished subagents back in, and on a long
+    // session that is dozens of them.
+    const firstSightDone = !prior && status === 'done';
+    const changed = !firstSightDone && (!prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey));
     next.set(a.agentId, { status, toolKey });
     if (changed) events.push(eventFor(a, status));
   }
@@ -250,9 +229,13 @@ export function diffSubagents(previous, snapshot) {
 // runWatcherOnce's - that one also resolves accounts and sends
 // notifications, neither of which subagent tracking needs.
 export async function runSubagentWatcherOnce(config, state, {
+  // Own tracker per call unless one is handed in: correct either way, but
+  // only a tracker that outlives the call reads a transcript once instead
+  // of on every pass.
+  tracker = createResolvedTracker(),
   registryFn = () => readRegistry(config.claudeHome),
   listFn = () => listTmuxSessions(),
-  snapshotFn = (sessionIds) => subagentSnapshot(config.claudeHome, sessionIds),
+  snapshotFn = (sessionIds) => subagentSnapshot(config.claudeHome, sessionIds, tracker),
 } = {}) {
   const registry = registryFn();
   const sessions = await listFn();
@@ -290,11 +273,49 @@ export function startSubagentWatcherInterval(config, {
   onEvents = () => {},
 } = {}) {
   const state = new Map();
+  const tracker = createResolvedTracker();
+  // Everything already published, merged per session. A client that
+  // connects later never saw the deltas that made the running agents
+  // appear, and the stream has nothing else to offer it - so the same
+  // deltas, merged, are its opening picture. Merged here rather than read
+  // from disk again: this is by definition what the earlier clients got.
+  const published = new Map();
+
+  function record(events) {
+    for (const event of events) {
+      const entry = published.get(event.tmuxSession) ?? { sessionId: event.sessionId, agents: new Map() };
+      entry.sessionId = event.sessionId;
+      for (const agent of event.agents) entry.agents.set(agent.agentId, agent);
+      published.set(event.tmuxSession, entry);
+    }
+    // runSubagentWatcherOnce drops a session that stopped running from
+    // `state`; without the same pruning here, its agents would be replayed
+    // to every new client for the rest of the process's life.
+    for (const key of published.keys()) if (!state.has(key)) published.delete(key);
+  }
+
   const timer = setIntervalFn(() => {
-    runFn(config, state)
-      .then(onEvents)
+    runFn(config, state, { tracker })
+      .then((events) => {
+        record(events);
+        onEvents(events);
+      })
       .catch((err) => console.error(`subagentWatcher: pass failed: ${err.message}`));
   }, intervalMs);
   timer.unref?.();
-  return () => clearIntervalFn(timer);
+
+  return {
+    stop: () => clearIntervalFn(timer),
+    // Only what is still running: diffSubagents keeps a finished agent in
+    // its state forever, and replaying one would have a fresh client fade
+    // out a node it never saw appear.
+    currentEvents() {
+      const events = [];
+      for (const [tmuxSession, entry] of published) {
+        const agents = [...entry.agents.values()].filter((agent) => agent.status === 'active');
+        if (agents.length > 0) events.push({ tmuxSession, sessionId: entry.sessionId, agents });
+      }
+      return events;
+    },
+  };
 }

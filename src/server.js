@@ -129,6 +129,7 @@ export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}
   app.use('/api/events', events.router);
   app.locals.publishStatus = events.publish;
   app.locals.publishSubagents = (event) => events.publish(event, 'subagents');
+  app.locals.setInitialEvents = events.setInitialEvents;
   app.use('/api/presence', presenceRouter());
   app.use('/api/accounts', accountsRouter(config));
   app.use('/api/uploads', uploadsRouter());
@@ -190,9 +191,12 @@ export function startServer(config = loadConfig()) {
   const stopStatusWatcher = startStatusWatcherInterval(config, {
     onEvents: (list) => list.forEach((event) => app.locals.publishStatus(event)),
   });
-  const stopSubagentWatcher = startSubagentWatcherInterval(config, {
+  const subagentWatcher = startSubagentWatcherInterval(config, {
     onEvents: (list) => list.forEach(app.locals.publishSubagents),
   });
+  // The subagent stream is deltas only, so whoever connects late hears the
+  // running agents from here instead of waiting for one of them to change.
+  app.locals.setInitialEvents(() => subagentWatcher.currentEvents().map((event) => ({ type: 'subagents', event })));
   const server = app.listen(config.port, config.host, () => {
     console.log(`Claudux is running on ${config.host}:${config.port}`);
   });
@@ -211,7 +215,7 @@ export function startServer(config = loadConfig()) {
   async function shutdown() {
     stopReaper();
     stopStatusWatcher();
-    stopSubagentWatcher();
+    subagentWatcher.stop();
     claudeCodeUpdate.stop();
     await new Promise((resolve) => {
       if (!ttydChild || ttydChild.exitCode !== null || ttydChild.signalCode !== null) {

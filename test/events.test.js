@@ -77,3 +77,38 @@ test('the real app does not gzip the SSE stream', async () => {
     server.close();
   }
 });
+
+// The stream carries deltas, so a client that connects while agents are
+// already running would start blind and stay that way for as long as
+// nothing changes - which for a stable set of agents can be forever. The
+// opening picture rides on the same connection, ahead of the first delta.
+test('a new client receives the current picture before any delta', async () => {
+  const { router, setInitialEvents } = eventsRouter();
+  setInitialEvents(() => [{ type: 'subagents', event: { tmuxSession: 'a', sessionId: 'sess-1', agents: [{ agentId: 'aaa111', status: 'active' }] } }]);
+  const app = express();
+  app.use('/', router);
+  const server = app.listen(0);
+  const { port } = server.address();
+  try {
+    const raw = await collectFirstEvent(port, () => {});
+    assert.match(raw, /event: subagents\ndata: \{"tmuxSession":"a","sessionId":"sess-1","agents":\[\{"agentId":"aaa111","status":"active"\}\]\}/);
+  } finally {
+    server.close();
+  }
+});
+
+test('a new client gets only the connection banner when nothing is running', async () => {
+  const { router, publish, setInitialEvents } = eventsRouter();
+  setInitialEvents(() => []);
+  const app = express();
+  app.use('/', router);
+  const server = app.listen(0);
+  const { port } = server.address();
+  try {
+    const raw = await collectFirstEvent(port, () => publish({ tmuxSession: 'a', state: 'busy' }));
+    assert.equal(raw.indexOf('event:'), raw.lastIndexOf('event:'));
+    assert.match(raw, /^: connected\n\nevent: status\n/);
+  } finally {
+    server.close();
+  }
+});

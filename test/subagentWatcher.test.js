@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { setMeta } from '../src/lib/sessionMeta.js';
-import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, agentAppearsDone, resolvedToolUseIds, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
+import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, agentAppearsDone, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
 
 // Claude Code writes a session's own transcript at
 // <projectDir>/<sessionId>.jsonl and its subagents' transcripts at
@@ -103,19 +103,6 @@ test('agentAppearsDone falls back to the last VALID assistant entry on a broken 
   const jsonl = line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } })
     + '{"type":"assistant","message":{"con\n';
   assert.equal(agentAppearsDone(jsonl), true);
-});
-
-test('resolvedToolUseIds collects tool_use_id from tool_result blocks', () => {
-  const jsonl =
-    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } })
-    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } })
-    + line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'done' }] } });
-  assert.deepEqual([...resolvedToolUseIds(jsonl)], ['toolu_1', 'toolu_2']);
-});
-
-test('resolvedToolUseIds ignores non-tool_result content and broken lines', () => {
-  const jsonl = line({ type: 'user', message: { content: [{ type: 'text', text: 'hi' }] } }) + '{ broken\n';
-  assert.deepEqual([...resolvedToolUseIds(jsonl)], []);
 });
 
 function writeAgent(dir, agentId, meta, transcriptLines) {
@@ -297,15 +284,14 @@ test('diffSubagents reports the transition to done exactly once', () => {
   assert.deepEqual(third.events, []);
 });
 
-test('diffSubagents keeps an agent done after its tool_result scrolls out of the tail window', () => {
+test('diffSubagents keeps an agent done even if a later snapshot reports it unresolved', () => {
   const first = diffSubagents(undefined, [agent()]);
   const second = diffSubagents(first.next, [agent({ resolved: true })]);
   assert.equal(second.events[0].status, 'done');
 
-  // readTranscriptTail only reads the last 64 kB, so a session with many
-  // finished subagents eventually pushes an agent's tool_result out of the
-  // window - the snapshot then reports resolved:false for an agent that
-  // was correctly marked done ticks ago.
+  // Whatever makes a snapshot report resolved:false for an agent that was
+  // correctly marked done ticks ago, the memory of the earlier tick has to
+  // win - an agent's own file writes nothing more once it is finished.
   const third = diffSubagents(second.next, [agent({ resolved: false })]);
   assert.equal(third.next.get('aaa111').status, 'done');
   assert.deepEqual(third.events, []);
@@ -403,7 +389,7 @@ test('runSubagentWatcherOnce forgets state for a carrier that stopped running', 
 test('startSubagentWatcherInterval polls on the given interval and forwards events', async () => {
   const calls = [];
   let tick;
-  const stop = startSubagentWatcherInterval({ dataDir: '/unused', claudeHome: '/unused' }, {
+  const watcher = startSubagentWatcherInterval({ dataDir: '/unused', claudeHome: '/unused' }, {
     intervalMs: 5,
     setIntervalFn: (fn) => { tick = fn; return 'timer'; },
     clearIntervalFn: () => { calls.push('cleared'); },
@@ -412,6 +398,144 @@ test('startSubagentWatcherInterval polls on the given interval and forwards even
   });
   await tick();
   assert.deepEqual(calls[0], [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [] }]);
-  stop();
+  watcher.stop();
   assert.equal(calls[1], 'cleared');
+});
+
+// A client that connects while agents are already running gets no delta for
+// them - the events that made them appear were published before it was
+// there. Merging what was published is that opening picture.
+function intervalHarness(passes) {
+  let tick;
+  let pass = 0;
+  const watcher = startSubagentWatcherInterval({ dataDir: '/unused', claudeHome: '/unused' }, {
+    setIntervalFn: (fn) => { tick = fn; return 'timer'; },
+    clearIntervalFn: () => {},
+    runFn: async (config, state) => passes[pass++](state),
+  });
+  return { watcher, tick: () => tick() };
+}
+
+test('currentEvents replays every agent a running session has published', async () => {
+  const { watcher, tick } = intervalHarness([
+    (state) => {
+      state.set('carrier-1', new Map());
+      return [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [eventAgent(), eventAgent({ agentId: 'bbb222' })] }];
+    },
+    (state) => {
+      state.set('carrier-1', new Map());
+      return [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [eventAgent({ currentTool: { name: 'Bash', input: null } })] }];
+    },
+  ]);
+  await tick();
+  await tick();
+  const [event] = watcher.currentEvents();
+  assert.equal(event.tmuxSession, 'carrier-1');
+  assert.equal(event.sessionId, 'sess-1');
+  assert.deepEqual(event.agents.map((a) => a.agentId).sort(), ['aaa111', 'bbb222']);
+  // The later delta wins - the replay is the current picture, not a log.
+  assert.deepEqual(event.agents.find((a) => a.agentId === 'aaa111').currentTool, { name: 'Bash', input: null });
+});
+
+test('currentEvents leaves out an agent that has finished', async () => {
+  const { watcher, tick } = intervalHarness([
+    (state) => {
+      state.set('carrier-1', new Map());
+      return [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [eventAgent(), eventAgent({ agentId: 'bbb222' })] }];
+    },
+    (state) => {
+      state.set('carrier-1', new Map());
+      return [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [eventAgent({ status: 'done' })] }];
+    },
+  ]);
+  await tick();
+  await tick();
+  assert.deepEqual(watcher.currentEvents()[0].agents.map((a) => a.agentId), ['bbb222']);
+});
+
+test('currentEvents forgets a session that stopped running', async () => {
+  const { watcher, tick } = intervalHarness([
+    (state) => {
+      state.set('carrier-1', new Map());
+      return [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [eventAgent()] }];
+    },
+    (state) => {
+      state.delete('carrier-1');
+      return [];
+    },
+  ]);
+  await tick();
+  assert.equal(watcher.currentEvents().length, 1);
+  await tick();
+  assert.deepEqual(watcher.currentEvents(), []);
+});
+
+function eventAgent(overrides) {
+  return {
+    agentId: 'aaa111', agentType: 'general-purpose', description: 'Explore', spawnDepth: 1,
+    currentTool: { name: 'Grep', input: { pattern: 'auth' } }, status: 'active',
+    ...overrides,
+  };
+}
+
+test('subagentSnapshot resolves an agent whose tool_result is far from the end of the transcript', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'),
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] } })
+    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'x'.repeat(200 * 1024) }] } }));
+  writeAgent(subagentsDir, 'aaa111', { agentType: 'general-purpose', toolUseId: 'toolu_1' }, []);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, true);
+});
+
+// One tracker for the process, not one per pass: a fresh tracker re-reads
+// the whole session transcript, which on a long session is megabytes -
+// every two seconds, for every open session.
+test('startSubagentWatcherInterval hands every pass the same resolution tracker', async () => {
+  const seen = [];
+  let tick;
+  startSubagentWatcherInterval({ dataDir: '/unused', claudeHome: '/unused' }, {
+    setIntervalFn: (fn) => { tick = fn; return 'timer'; },
+    runFn: async (config, state, opts) => { seen.push(opts.tracker); return []; },
+  });
+  await tick();
+  await tick();
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0], seen[1]);
+  assert.equal(typeof seen[0].idsFor, 'function');
+});
+
+// Every restart reads a session's whole history of subagents back in, and
+// on a long session that is dozens of long-finished ones. Reporting them
+// would have every connected browser draw a node and fade it out again for
+// an agent that finished hours ago.
+test('diffSubagents stays quiet about an agent that was already finished when first seen', () => {
+  const { events, next } = diffSubagents(undefined, [agent({ resolved: true })]);
+  assert.deepEqual(events, []);
+  // Remembered all the same: without this the next tick would see no prior
+  // and report it as a brand-new agent.
+  assert.equal(next.get('aaa111').status, 'done');
+});
+
+// A parent agent that spawns several children writes plenty itself, so its
+// own transcript outgrows a tail read just like a session's does - measured
+// on this host, all 8 nested agents of one session sat outside it.
+test('subagentSnapshot resolves a nested agent whose tool_result is far from the end of the parent transcript', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  writeAgent(subagentsDir, 'parent1', { agentType: 'general-purpose', toolUseId: 'toolu_parent' }, []);
+  fs.appendFileSync(path.join(subagentsDir, 'agent-parent1.jsonl'),
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_child', content: 'ok' }] } })
+    + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'x'.repeat(200 * 1024) }] } }));
+  writeAgent(subagentsDir, 'child1', { agentType: 'general-purpose', toolUseId: 'toolu_child', parentAgentId: 'parent1', spawnDepth: 2 }, []);
+
+  const byId = new Map(subagentSnapshot(claudeHome, ['sess-1']).map((a) => [a.agentId, a]));
+  assert.equal(byId.get('child1').resolved, true);
 });
