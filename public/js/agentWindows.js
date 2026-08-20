@@ -20,19 +20,26 @@ import { svg } from './icons.js';
 // directory.
 const MAX_WINDOWS = 6;
 const WINDOW_WIDTH = 360;
-const MIN_WINDOW_WIDTH = 260;
 // Below this a window shows a title bar and barely two lines, which is not
 // worth a tile. Above the upper bound a single row would run the full height
 // of the screen for a conversation that is a few lines long.
 const MIN_WINDOW_HEIGHT = 180;
 const MAX_WINDOW_HEIGHT = 420;
 const GAP = 12;
-// Distance from the row, so the curve between them is visible at all: the
-// lines are drawn under the windows, and a window starting at its own
-// anchor hides its own line. Dropped on a narrow screen, where that space
-// is the difference between one column and none.
-const ANCHOR_GAP = 96;
-const ANCHOR_GAP_TIGHT = 24;
+// Windows sit on an arc around the row's edge rather than in a grid: a grid
+// puts every window the same distance away in the same direction, and the
+// curves that are the point of the thing then run through the windows in
+// front. On an arc each one has its own direction out of the edge.
+const MIN_ARC_RADIUS = 140;
+const MAX_ARC_RADIUS = 460;
+// A little irregularity per agent, so an arc reads as one rather than as a
+// mechanism. Derived from the agent's id, not drawn at random: a window
+// must not jump on every re-layout.
+const JITTER_RADIUS = 34;
+const JITTER_Y = 18;
+// Enough vertical distance between two windows on the arc that both title
+// bars stay readable.
+const ARC_MIN_SEPARATION = 96;
 // A finished agent's window stays long enough to see that it finished, and
 // to take in its last lines, then retracts by itself. Leaving it would fill
 // the screen with windows that nothing is happening in any more.
@@ -125,49 +132,70 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     drawLines();
   }
 
-  // Spread over the area right of the row rather than cascaded from it: a
-  // cascade of six 360px windows is six windows on top of each other, and
-  // the whole point is seeing several agents at once.
-  //
-  // The screen decides the grid, not the other way round. As many columns
-  // as fit at the preferred width, the rest as rows, and never more rows
-  // than a readable window height allows - so a narrow screen gets fewer,
-  // fully visible windows instead of a pile.
-  function gridFor(sessionId, count) {
-    const anchor = anchorOf(sessionId);
-    const areaHeight = window.innerHeight - 2 * GAP;
-    const maxRows = Math.max(1, Math.floor((areaHeight + GAP) / (MIN_WINDOW_HEIGHT + GAP)));
-    const wideEnough = window.innerWidth - (anchor?.x ?? 0) - ANCHOR_GAP - GAP >= 2 * (MIN_WINDOW_WIDTH + GAP);
-    const left = (anchor?.x ?? 0) + (wideEnough ? ANCHOR_GAP : ANCHOR_GAP_TIGHT);
-    const areaWidth = window.innerWidth - left - GAP;
-    const columns = Math.max(1, Math.min(count, Math.floor((areaWidth + GAP) / (WINDOW_WIDTH + GAP))));
-    const rows = Math.min(maxRows, Math.ceil(count / columns));
+  // A stable, id-derived wobble, so the arc looks like an arc of windows
+  // rather than of slots - and so a window does not jump every time
+  // something is re-laid out.
+  function jitterOf(agentId) {
+    let hash = 0;
+    for (let i = 0; i < agentId.length; i += 1) hash = (hash * 31 + agentId.charCodeAt(i)) | 0;
+    hash = Math.abs(hash);
     return {
-      left,
-      columns,
-      rows,
-      capacity: columns * maxRows,
-      width: Math.min(WINDOW_WIDTH, Math.max(MIN_WINDOW_WIDTH, Math.floor((areaWidth + GAP) / columns) - GAP)),
-      height: Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, Math.floor((areaHeight + GAP) / rows) - GAP)),
+      radius: (hash % (2 * JITTER_RADIUS)) - JITTER_RADIUS,
+      y: ((hash >> 8) % (2 * JITTER_Y)) - JITTER_Y,
     };
   }
 
-  // How many windows this screen can show at once without stacking them.
+  // Windows on an arc to the right of the row's edge, one direction each.
+  // Their height comes first, because it is what decides how much vertical
+  // room is left to fan them out in - a screen full of tall windows has no
+  // arc, only a column.
+  function arcFor(sessionId, count) {
+    const anchor = anchorOf(sessionId) ?? { x: 0, y: window.innerHeight / 2 };
+    const usable = window.innerHeight - 2 * GAP;
+    // Two windows' worth of vertical room at most, so there is always
+    // somewhere for the next one to sit.
+    const height = Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, Math.floor(usable / 2.2)));
+    const top = GAP + height / 2;
+    const bottom = window.innerHeight - GAP - height / 2;
+    return {
+      anchor,
+      height,
+      top,
+      span: Math.max(0, bottom - top),
+      radius: Math.max(MIN_ARC_RADIUS, Math.min(MAX_ARC_RADIUS, window.innerWidth - anchor.x - WINDOW_WIDTH - GAP)),
+      count,
+    };
+  }
+
+  // How many windows this screen can fan out before their title bars start
+  // covering each other.
   function capacityFor(sessionId) {
-    return narrow() ? MAX_WINDOWS : Math.min(MAX_WINDOWS, gridFor(sessionId, MAX_WINDOWS).capacity);
+    if (narrow()) return MAX_WINDOWS;
+    const arc = arcFor(sessionId, MAX_WINDOWS);
+    return Math.max(1, Math.min(MAX_WINDOWS, Math.floor(arc.span / ARC_MIN_SEPARATION) + 1));
   }
 
   function layout(sessionId) {
     if (narrow()) return;
     const mine = [...open.values()].filter((entry) => entry.sessionId === sessionId && !entry.moved);
     if (mine.length === 0) return;
-    const grid = gridFor(sessionId, mine.length);
+    const arc = arcFor(sessionId, mine.length);
     mine.forEach((entry, index) => {
-      entry.x = grid.left + (index % grid.columns) * (grid.width + GAP);
-      entry.y = GAP + Math.floor(index / grid.columns) * (grid.height + GAP);
-      entry.el.style.width = `${grid.width}px`;
-      entry.el.style.height = `${grid.height}px`;
-      place(entry, grid.width);
+      // Evenly over the vertical room, then out to the arc: a window level
+      // with the edge sits furthest away, one above or below comes back in.
+      // That is what makes the set read as a half circle around the row
+      // rather than as a row of its own.
+      const t = mine.length === 1 ? 0.5 : index / (mine.length - 1);
+      const centerY = arc.top + t * arc.span;
+      const jitter = jitterOf(entry.agentId);
+      const radius = Math.max(MIN_ARC_RADIUS, arc.radius + jitter.radius);
+      const dy = centerY - arc.anchor.y;
+      const dx = Math.max(MIN_ARC_RADIUS / 2, Math.sqrt(Math.max(0, radius * radius - dy * dy)));
+      entry.x = arc.anchor.x + dx;
+      entry.y = centerY - arc.height / 2 + jitter.y;
+      entry.el.style.width = `${WINDOW_WIDTH}px`;
+      entry.el.style.height = `${arc.height}px`;
+      place(entry, WINDOW_WIDTH);
     });
   }
 
@@ -211,9 +239,10 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
 
     const entry = {
       el,
+      agentId: agent.agentId,
       sessionId,
       offset: 0,
-      x: (anchor?.x ?? 0) + ANCHOR_GAP,
+      x: (anchor?.x ?? 0) + MIN_ARC_RADIUS,
       y: GAP,
       // Set once this window has been dragged: layout() leaves it alone
       // from then on, so a placement by hand survives the next one.

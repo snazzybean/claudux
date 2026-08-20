@@ -2078,12 +2078,21 @@ button { cursor: pointer; }
   z-index: 7;
   pointer-events: none;
 }
+/* A dash pattern travelling along the stroke: the connection itself reads
+   as carrying something, without a second element per line. The bright dot
+   on top of it (.agent-pulse) still marks a real event. */
 .agent-line {
   fill: none;
   stroke: var(--live);
   stroke-width: 1.5;
   opacity: 0.4;
+  stroke-dasharray: 5 11;
   filter: drop-shadow(0 0 4px var(--live));
+  animation: agent-line-flow 1.6s linear infinite;
+}
+@keyframes agent-line-flow {
+  from { stroke-dashoffset: 16; }
+  to { stroke-dashoffset: 0; }
 }
 .agent-pulse {
   fill: var(--live);
@@ -2091,6 +2100,7 @@ button { cursor: pointer; }
 }
 @media (prefers-reduced-motion: reduce) {
   .agent-pulse { display: none; }
+  .agent-line { animation: none; stroke-dasharray: none; }
 }
 
 /* Account on the left, model on the right - both apply to everything
