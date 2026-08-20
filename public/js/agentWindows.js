@@ -147,7 +147,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       if (!anchor || placed.length === 0) continue;
       const byBox = new Map(placed.map((entry) => [entry.box, entry.agentId]));
       for (const route of routesFor(placed.map((entry) => entry.box), anchor)) {
-        routes.push({ agentId: byBox.get(route.box), points: route.points });
+        routes.push({ agentId: byBox.get(route.box), path: route.path });
       }
     }
     lines.draw(routes);

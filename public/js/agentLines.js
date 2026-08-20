@@ -2,19 +2,23 @@
 //
 // The glowing connections between a session's row and its open agent windows,
 // and the pulses that run along them. Owns the svg overlay and nothing else:
-// it is handed waypoints and draws them, so the window module never touches a
-// path, a filter or an animation.
+// it is handed finished curves and draws them, so the window module never
+// touches a path, a filter or an animation.
 //
 // The glow is an SVG filter rather than `filter: drop-shadow`: a drop shadow
 // is one offset copy and reads as a thin line with a haze, while a blurred
 // copy of the stroke merged under the sharp one reads as light.
 const GLOW_FILTER_ID = 'agentLineGlow';
-const PULSE_DURATION_MS = 1100;
+// A pulse travels at a speed, not for a duration: the routes share a trunk
+// but end at very different distances, and one duration for all of them had
+// two dots on the same stretch moving at visibly different speeds.
+// 0.65px/ms puts the shortest line in a layout - around 310px - at just under
+// 0.7s, which is still long enough to register as a moving dot, and the
+// longest at about 2s.
+const PULSE_SPEED_PX_MS = 0.65;
+const PULSE_MIN_MS = 700;
+const PULSE_MAX_MS = 2400;
 const RETRACT_MS = 420;
-// How much of a corner is rounded off. Generous on purpose: with a small
-// radius the turn out of a lane into a window is very nearly a right angle,
-// and a line of right angles reads as plumbing rather than as a cable.
-const CORNER_RADIUS = 34;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -45,49 +49,19 @@ function glowDefs() {
   return defs;
 }
 
-const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
-
-// `travel` units from `from` towards `to`.
-function towards(from, to, travel) {
-  const span = distance(from, to);
-  if (span === 0) return { ...from };
-  return { x: from.x + ((to.x - from.x) * travel) / span, y: from.y + ((to.y - from.y) * travel) / span };
-}
-
-// Waypoints the route did not need: two in the same place, or one sitting on
-// the straight line between its neighbours. Left in, each would add a corner
-// where there is no turn.
-function meaningful(points) {
-  const kept = [];
-  for (const point of points) {
-    const last = kept[kept.length - 1];
-    if (last && distance(last, point) < 1) continue;
-    kept.push(point);
+// The route's own segments, written out. The curve is decided in
+// agentLayout.js, where it can be measured without a browser; nothing about
+// the shape is decided here.
+export function pathString(path) {
+  const round = (value) => Math.round(value * 10) / 10;
+  let d = `M ${round(path.start.x)} ${round(path.start.y)}`;
+  for (const segment of path.segments) {
+    d += segment.c1
+      ? ` C ${round(segment.c1.x)} ${round(segment.c1.y)}, ${round(segment.c2.x)} ${round(segment.c2.y)},`
+        + ` ${round(segment.to.x)} ${round(segment.to.y)}`
+      : ` L ${round(segment.to.x)} ${round(segment.to.y)}`;
   }
-  return kept.filter((point, i) => {
-    if (i === 0 || i === kept.length - 1) return true;
-    const [a, b] = [kept[i - 1], kept[i + 1]];
-    const area = Math.abs((b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x));
-    return area / Math.max(1, distance(a, b)) > 1;
-  });
-}
-
-// A polyline with its corners rounded off - straight where nothing turns, and
-// a real curve where something does. Exported so the crossing check can
-// sample the very path that gets drawn (see scripts/probe/).
-export function smoothPath(points) {
-  const pts = meaningful(points);
-  if (pts.length < 2) return '';
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 1; i < pts.length - 1; i += 1) {
-    const [before, corner, after] = [pts[i - 1], pts[i], pts[i + 1]];
-    const radius = Math.min(CORNER_RADIUS, distance(before, corner) / 2, distance(corner, after) / 2);
-    const start = towards(corner, before, radius);
-    const end = towards(corner, after, radius);
-    d += ` L ${start.x} ${start.y} Q ${corner.x} ${corner.y}, ${end.x} ${end.y}`;
-  }
-  const last = pts[pts.length - 1];
-  return `${d} L ${last.x} ${last.y}`;
+  return d;
 }
 
 export function initAgentLines(svgEl) {
@@ -110,7 +84,7 @@ export function initAgentLines(svgEl) {
     live.replaceChildren();
     drawn.clear();
     for (const route of routes) {
-      const d = smoothPath(route.points);
+      const d = pathString(route.path);
       if (!d) continue;
       const path = element('path', { d, class: 'agent-line' });
       live.appendChild(path);
@@ -132,10 +106,11 @@ export function initAgentLines(svgEl) {
     dot.style.offsetPath = `path("${path.getAttribute('d')}")`;
     dot.style.offsetRotate = '0deg';
     live.appendChild(dot);
+    const duration = Math.min(PULSE_MAX_MS, Math.max(PULSE_MIN_MS, path.getTotalLength() / PULSE_SPEED_PX_MS));
     const run = dot.animate(
       [{ offsetDistance: direction === 'toLead' ? '100%' : '0%' },
         { offsetDistance: direction === 'toLead' ? '0%' : '100%' }],
-      { duration: PULSE_DURATION_MS, easing: 'ease-in-out' },
+      { duration, easing: 'ease-in-out' },
     );
     run.addEventListener('finish', () => dot.remove());
     // A pulse whose line is redrawn under it would otherwise stay for good,

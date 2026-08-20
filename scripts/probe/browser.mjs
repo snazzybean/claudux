@@ -39,34 +39,78 @@ const seen = await page.evaluate(() => {
     return { title: el.querySelector('.agent-window-title').textContent, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
   });
   const sampled = paths.map(sample);
-  const sgn = (a, b, c) => Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+  // Which side of ab does c lie on - as a distance in pixels, with anything
+  // under half of one counted as "on the line". Sampling the same trunk from
+  // two paths of different lengths lands on different points along it, and
+  // their cross products come out at 1e-6 rather than 0, which a bare
+  // Math.sign reads as opposite sides. That alone reported ten crossings in
+  // a picture that has none.
+  const sgn = (a, b, c) => {
+    const span = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const gap = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / span;
+    return Math.abs(gap) < 0.5 ? 0 : Math.sign(gap);
+  };
   let crossings = 0;
+  const where = [];
   for (let i = 0; i < sampled.length; i += 1) {
     for (let j = i + 1; j < sampled.length; j += 1) {
-      for (let a = 6; a < sampled[i].length; a += 1) {
-        for (let b = 6; b < sampled[j].length; b += 1) {
+      for (let a = 1; a < sampled[i].length; a += 1) {
+        for (let b = 1; b < sampled[j].length; b += 1) {
           const [p, q, r, s] = [sampled[i][a - 1], sampled[i][a], sampled[j][b - 1], sampled[j][b]];
-          if (sgn(p, q, r) !== sgn(p, q, s) && sgn(r, s, p) !== sgn(r, s, q)) { crossings += 1; a = 1e9; b = 1e9; }
+          // Strictly on one side, all four: every line shares the climb and
+          // the trunk with every other one, and touching is not crossing.
+          const [s1, s2, s3, s4] = [sgn(p, q, r), sgn(p, q, s), sgn(r, s, p), sgn(r, s, q)];
+          if (s1 && s2 && s3 && s4 && s1 !== s2 && s3 !== s4) {
+            crossings += 1;
+            where.push(`${i}x${j} bei (${Math.round(p.x)},${Math.round(p.y)})`);
+            a = 1e9; b = 1e9;
+          }
         }
       }
     }
   }
+  // The sharpest bend along a line, in degrees, measured over roughly 14px of
+  // its length: 180 is straight, 90 a right angle. Read off the drawn svg
+  // rather than the model, because "kantig" is a property of what is on
+  // screen.
+  const sharpestBend = (pts, len) => {
+    const step = Math.max(1, Math.round(14 / (len / (pts.length - 1))));
+    let sharpest = 180;
+    for (let i = step; i + step < pts.length; i += step) {
+      const u = { x: pts[i].x - pts[i - step].x, y: pts[i].y - pts[i - step].y };
+      const v = { x: pts[i + step].x - pts[i].x, y: pts[i + step].y - pts[i].y };
+      const lengths = Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y);
+      if (!lengths) continue;
+      const cos = Math.min(1, Math.max(-1, (u.x * v.x + u.y * v.y) / lengths));
+      sharpest = Math.min(sharpest, 180 - (Math.acos(cos) * 180) / Math.PI);
+    }
+    return sharpest;
+  };
   const inside = (p, b) => p.x > b.x + 2 && p.x < b.x + b.w - 2 && p.y > b.y + 2 && p.y < b.y + b.h - 2;
   let through = 0;
   sampled.forEach((pts) => boxes.forEach((b) => { if (pts.some((p) => inside(p, b))) through += 1; }));
   return {
     boxes,
-    lines: paths.map((p) => ({ len: Math.round(p.getTotalLength()) })),
+    anchor: paths.length
+      ? [Math.round(paths[0].getPointAtLength(0).x), Math.round(paths[0].getPointAtLength(0).y)]
+      : null,
+    lines: paths.map((p, i) => ({
+      len: Math.round(p.getTotalLength()),
+      bend: Math.round(sharpestBend(sampled[i], p.getTotalLength())),
+    })),
     crossings,
+    where,
     through,
   };
 });
 
 console.log(`Zähler am Rand: ${count}`);
-console.log(`Fenster: ${seen.boxes.length}`);
+console.log(`Fenster: ${seen.boxes.length}, Anker der Linien bei (${seen.anchor})`);
 for (const b of seen.boxes) console.log(`   ${b.title.padEnd(32)} ${b.w}x${b.h} bei (${b.x},${b.y})`);
 console.log(`Linien: ${seen.lines.length}, Längen ${seen.lines.map((l) => l.len).join('/')}`);
+console.log(`engste Wendung je Linie: ${seen.lines.map((l) => `${l.bend}°`).join('/')} (180° ist gerade)`);
 console.log(`Kreuzungen: ${seen.crossings}   durch fremde Fenster: ${seen.through}`);
+for (const spot of seen.where) console.log(`   kreuzt ${spot}`);
 
 // A pulse needs a real message: append one to the session transcript and wait
 // for the watcher's next pass to report it.
@@ -140,8 +184,16 @@ if (TRANSCRIPT) {
     });
     return { win: [Math.round(win.x), Math.round(win.y), Math.round(win.width), Math.round(win.height)], ends };
   });
-  const onEdge = after.ends.some(([x, y]) => Math.abs(x - after.win[0]) < 60
-    && (Math.abs(y - after.win[1]) < 3 || Math.abs(y - (after.win[1] + after.win[3])) < 3));
+  // On an edge, wherever along it: the entry point is a fraction of the
+  // window's own width and slides with it, so a test that expects it a fixed
+  // distance from a corner tests last month's layout.
+  const [wx, wy, ww, wh] = after.win;
+  const onEdge = after.ends.some(([x, y]) => {
+    const alongX = x >= wx - 3 && x <= wx + ww + 3;
+    const alongY = y >= wy - 3 && y <= wy + wh + 3;
+    return (alongX && (Math.abs(y - wy) < 3 || Math.abs(y - (wy + wh)) < 3))
+      || (alongY && (Math.abs(x - wx) < 3 || Math.abs(x - (wx + ww)) < 3));
+  });
   console.log(`Ziehen: Ende vorher (${before}), Fenster jetzt bei (${after.win[0]},${after.win[1]}), Linie sitzt an einer Kante: ${onEdge ? 'ja' : 'NEIN'}`);
   await page.screenshot({ path: `${OUT}-dragged.png` });
 }
