@@ -14,6 +14,7 @@ import { createResolvedTracker } from './resolvedIds.js';
 import { readRegistry, reconcile } from './sessionRegistry.js';
 import { listTmuxSessions, aliveSessionNames } from './tmuxManager.js';
 import { getMeta, claudeSessionIdsForTmux } from './sessionMeta.js';
+import { liveTeamMembers } from './teamRegistry.js';
 
 // A session's own transcript sits at <projectDir>/<sessionId>.jsonl; its
 // subagents live in the sibling directory <projectDir>/<sessionId>/subagents.
@@ -43,6 +44,10 @@ export function parseAgentMeta(rawJson) {
     // one, and thus the transcript that will carry its tool_result.
     parentAgentId: typeof raw.parentAgentId === 'string' ? raw.parentAgentId : null,
     spawnDepth: Number.isFinite(raw.spawnDepth) ? raw.spawnDepth : 1,
+    // Set for an agent spawned under a name: together they identify it in
+    // its team's registry, which is what says whether it still runs.
+    name: typeof raw.name === 'string' ? raw.name : null,
+    teamName: typeof raw.teamName === 'string' ? raw.teamName : null,
   };
 }
 
@@ -113,16 +118,30 @@ const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 // three cases rather than one session-wide lookup. `ownTranscript` is the
 // text subagentSnapshot already read for currentTool - null when that read
 // failed, which agentAppearsDone reads as "not done".
-// Nothing written for this long and the agent is treated as gone. It is
-// the only signal an interrupted agent leaves - it writes no closing
-// message and no id is ever recorded for it, so nothing on disk tells it
-// apart from one waiting on a slow tool call. Which is why it is reported
-// separately from `resolved` and is not sticky: a genuinely slow agent
-// comes back on its next line, and ten minutes is short enough that an
-// abandoned one is not still circling long after the fact.
+// Nothing written for this long and the agent is treated as gone. The last
+// resort only: it applies where neither an id nor a team registry can
+// answer, which after the registry is a `Task` agent whose caller never
+// recorded a result. Reported separately from `resolved` and not sticky,
+// since a slow tool call looks the same and has to be able to come back.
 const SILENT_DONE_MS = 10 * 60 * 1000;
 
-function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker) {
+// An agent's registry entry and its meta file are written at almost the
+// same moment. Reading between the two must not brand a brand-new agent as
+// finished, because that verdict is sticky.
+const REGISTRY_GRACE_MS = 3000;
+
+function agentIsResolved(claudeHome, dir, meta, sessionResolved, ownTranscript, tracker, silentForMs) {
+  // A named agent records no tool_result anywhere, so its own transcript
+  // used to be the only evidence - and "no tool_use in the last turn"
+  // cannot tell an answer from a remark between two tool calls. The team
+  // registry can: Claude Code lists a teammate while it runs and drops it
+  // the moment it stops, finished or aborted alike.
+  if (meta.name && meta.teamName) {
+    const live = liveTeamMembers(claudeHome, meta.teamName);
+    // null means the registry could not be read, not that the team is
+    // empty - only a readable one may be taken as evidence.
+    if (live) return !live.has(meta.name) && silentForMs >= REGISTRY_GRACE_MS;
+  }
   // A slash command spawns an agent without a Task call, so there is no id
   // to look for anywhere - its own transcript is the only evidence there is.
   if (!meta.toolUseId) return agentAppearsDone(ownTranscript);
@@ -199,7 +218,7 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
       description: meta.description,
       spawnDepth: meta.spawnDepth,
       currentTool: currentToolFromAgentTranscript(ownTranscript),
-      resolved: agentIsResolved(dir, meta, resolved, ownTranscript, tracker),
+      resolved: agentIsResolved(claudeHome, dir, meta, resolved, ownTranscript, tracker, silentForMs),
       silent: silentForMs >= SILENT_DONE_MS,
     });
   }

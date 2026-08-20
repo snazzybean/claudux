@@ -36,6 +36,31 @@ test('parseAgentMeta reads agentType, description, toolUseId, parentAgentId, and
     toolUseId: 'toolu_01Bu4gHiR5R22yqLC6sRSyGa',
     parentAgentId: 'a19c417324c2ebbb8',
     spawnDepth: 2,
+    name: null,
+    teamName: null,
+  });
+});
+
+// Verbatim from a real meta.json on this host: an agent spawned under a
+// name carries no toolUseId at all, and the pair name/teamName is what
+// finds it in its team's registry.
+test('parseAgentMeta reads the name and team of an agent spawned under a name', () => {
+  const raw = JSON.stringify({
+    agentType: 'Vermessung',
+    description: 'Module in src/lib vermessen',
+    name: 'Vermessung',
+    teamName: 'session-927ac664',
+    taskKind: 'in_process_teammate',
+    spawnDepth: 0,
+  });
+  assert.deepEqual(parseAgentMeta(raw), {
+    agentType: 'Vermessung',
+    description: 'Module in src/lib vermessen',
+    toolUseId: null,
+    parentAgentId: null,
+    spawnDepth: 0,
+    name: 'Vermessung',
+    teamName: 'session-927ac664',
   });
 });
 
@@ -47,6 +72,8 @@ test('parseAgentMeta defaults a missing description and spawnDepth, and a top-le
     toolUseId: 'toolu_1',
     parentAgentId: null,
     spawnDepth: 1,
+    name: null,
+    teamName: null,
   });
 });
 
@@ -654,4 +681,69 @@ test('diffSubagents keeps a resolved agent done even if it writes again', () => 
   assert.equal(done.events[0].status, 'done');
   const later = diffSubagents(done.next, [agent({ currentTool: { name: 'Bash', input: {} } })]);
   assert.deepEqual(later.events, []);
+});
+
+// A named agent records no tool_result anywhere, so its team's registry is
+// the only exact answer about it - verified on this host: a teammate is in
+// `members` while it runs and gone from there the moment it stops, whether
+// it finished or was aborted.
+function teamFixture(claudeHome, teamName, memberNames) {
+  const dir = path.join(claudeHome, 'teams', teamName);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+    name: teamName,
+    members: memberNames.map((name) => ({ agentId: `${name}@${teamName}`, name })),
+  }));
+}
+
+test('subagentSnapshot keeps a named agent active while its team still lists it', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  teamFixture(claudeHome, 'session-abc', ['team-lead', 'Probe']);
+  // The commentary-between-tool-calls case: without the registry this reads
+  // as an answer and the agent would count as finished.
+  writeAgent(subagentsDir, 'aProbe-f30030d664368b10',
+    { agentType: 'Probe', name: 'Probe', teamName: 'session-abc', taskKind: 'in_process_teammate', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'Now the next slice.' }], stop_reason: null } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, false);
+});
+
+test('subagentSnapshot counts a named agent as finished once its team drops it', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  teamFixture(claudeHome, 'session-abc', ['team-lead']);
+  writeAgent(subagentsDir, 'aProbe-f30030d664368b10',
+    { agentType: 'Probe', name: 'Probe', teamName: 'session-abc', taskKind: 'in_process_teammate', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }]);
+  // Older than the spawn-race grace, so absence is trusted.
+  const agentPath = path.join(subagentsDir, 'agent-aProbe-f30030d664368b10.jsonl');
+  const before = new Date(Date.now() - 60_000);
+  fs.utimesSync(agentPath, before, before);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, true);
+});
+
+// The registry entry and the meta file are written at almost the same
+// moment; reading between the two must not brand a brand-new agent as
+// finished, since 'done' is sticky.
+test('subagentSnapshot does not trust a team registry that has just been overtaken', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  teamFixture(claudeHome, 'session-abc', ['team-lead']);
+  writeAgent(subagentsDir, 'aFresh-f30030d664368b10',
+    { agentType: 'Fresh', name: 'Fresh', teamName: 'session-abc', taskKind: 'in_process_teammate', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, false);
+});
+
+test('subagentSnapshot falls back to the transcript when there is no team registry', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  writeAgent(subagentsDir, 'aLonely-f30030d664368b10',
+    { agentType: 'Lonely', name: 'Lonely', teamName: 'session-gone', taskKind: 'in_process_teammate', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'text', text: 'All done.' }], stop_reason: 'end_turn' } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.resolved, true);
 });
