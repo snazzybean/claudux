@@ -2,6 +2,8 @@
 // been parsed - the nodes are guaranteed to exist by the time they run.
 export const appEl = document.getElementById('app');
 export const projectListEl = document.getElementById('projectList');
+export const agentWindowsEl = document.getElementById('agentWindows');
+export const agentLinesEl = document.getElementById('agentLines');
 export const terminalFrameEl = document.getElementById('terminalFrame');
 export const onboardingWizardEl = document.getElementById('onboardingWizard');
 export const errorBannerEl = document.getElementById('errorBanner');

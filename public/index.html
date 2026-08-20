@@ -139,6 +139,12 @@
         <!-- The switcher and account sit as a semi-transparent bar OVER
              the terminal rather than in rows below it, so the terminal
              starts at the top edge. -->
+        <!-- Agent windows and the lines back to their sidebar row. Outside
+             .terminal-wrap so a window can be dragged anywhere on screen;
+             the svg never takes a pointer event, only the windows do. See
+             docs/superpowers/specs/2026-08-20-claudux-agent-fenster-design.md. -->
+        <svg class="agent-lines" id="agentLines" aria-hidden="true"></svg>
+        <div class="agent-windows" id="agentWindows"></div>
         <div class="terminal-wrap">
           <div class="panel-overlay">
             <!-- The only one on the left: it navigates, while the right

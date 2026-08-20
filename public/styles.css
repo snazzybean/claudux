@@ -1044,6 +1044,9 @@ button { cursor: pointer; }
 .session-row {
   width: 100%;
   display: grid;
+  /* Containing block for .session-agents-edge, which hangs off the right
+     edge rather than sitting in a column. */
+  position: relative;
   /* Fixed widths instead of `auto` for everything right of the title: with
      `auto`, each row aligns to its OWN content, and since the columns for
      auth state and the end button are mostly empty, the time sat in a
@@ -1077,16 +1080,6 @@ button { cursor: pointer; }
   margin: 0 0 6px;
   background: var(--surface-hover); /* fallback for browsers without color-mix */
   background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
-}
-/* .subagent-badge sits between the dot and the title in the markup, so
-   showing it needs its own column - like .lock-btn below, it costs
-   nothing while [hidden] (removed from the grid via display:none), but
-   unlike .lock-btn its visibility is per-session data, not one app-wide
-   flag, hence :has() rather than an .app[data-edit] selector. Combined
-   with edit mode below so both extra columns apply together when both
-   are showing. */
-.session-row:has(.subagent-badge:not([hidden])) {
-  grid-template-columns: 14px 20px 1fr 30px 26px 0;
 }
 .session-row:hover:not(:disabled) {
   background: var(--surface-hover); /* fallback for browsers without color-mix */
@@ -1314,9 +1307,6 @@ button { cursor: pointer; }
 .lock-btn { display: none; }
 .app[data-edit="on"] .session-row {
   grid-template-columns: 14px 1fr 30px auto 18px;
-}
-.app[data-edit="on"] .session-row:has(.subagent-badge:not([hidden])) {
-  grid-template-columns: 14px 20px 1fr 30px auto 18px;
 }
 /* .btn-quiet, plus its own font-size/line-height and the edit-mode-only
    visibility. */
@@ -2020,17 +2010,112 @@ button { cursor: pointer; }
    title in the markup, and [hidden] keeps it out of the grid entirely
    while there's nothing to show, the same way .lock-btn stays out
    outside edit mode. */
-.subagent-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* The right edge of a row, glowing while agents run in that session, with
+   their count in it. Absolutely positioned rather than a grid cell: it
+   belongs to the row's edge, not to its content, and a cell would have to
+   push the columns around whenever it appears. */
+.session-agents-edge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 100%;
+  padding: 0;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
   font-size: var(--fs-meta);
   color: var(--on-accent);
   background: var(--live);
-  border-radius: var(--r-sm);
-  padding: 0 5px;
+  animation: agents-edge-glow 2.4s ease-in-out infinite;
 }
-.subagent-badge[hidden] { display: none; }
+.session-agents-edge[hidden] { display: none; }
+@keyframes agents-edge-glow {
+  0%, 100% { box-shadow: 0 0 5px var(--live); }
+  50% { box-shadow: 0 0 13px var(--live); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-agents-edge { animation: none; box-shadow: 0 0 7px var(--live); }
+}
+
+/* One window per running subagent, dragged out of its session's row edge.
+   Fixed rather than absolute: dragging happens in viewport coordinates,
+   and so does the line overlay they are connected to. */
+.agent-windows {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.agent-window {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-height: 40vh;
+  pointer-events: auto;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--glass-card);
+  box-shadow: 0 0 0 1px var(--live), 0 8px 24px rgb(0 0 0 / 45%);
+}
+.agent-window-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--fs-meta);
+  cursor: grab;
+}
+.agent-window-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-window-body {
+  overflow-y: auto;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--fs-meta);
+}
+.agent-block-tool {
+  display: flex;
+  gap: var(--space-sm);
+}
+.agent-tool-name { color: var(--live); }
+.agent-tool-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-result {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
+/* Never takes a pointer event - the windows above it and the sidebar
+   underneath it both have to stay operable. */
+.agent-lines {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
+}
+.agent-line {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 1.5;
+  opacity: 0.55;
+  filter: drop-shadow(0 0 4px var(--live));
+}
+.agent-pulse {
+  fill: var(--live);
+  filter: drop-shadow(0 0 6px var(--live));
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-pulse { display: none; }
+}
 
 /* Account on the left, model on the right - both apply to everything
    below. */
@@ -2244,6 +2329,26 @@ button { cursor: pointer; }
 .keybar[data-expanded="true"] .keybar-more svg { transform: rotate(180deg); }
 .keybar-more { flex: 0 0 auto; }
 .keybar-more svg { transition: transform var(--dur); }
+/* No sidebar edge to hang off and no room to place a window by hand, so
+   they stack over the full width instead. The lines have nothing to point
+   at and stay away. */
+@media (max-width: 720px) {
+  .agent-windows {
+    inset: auto 0 0 0;
+    max-height: 60%;
+    overflow-y: auto;
+    pointer-events: auto;
+  }
+  .agent-window {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: var(--space-sm);
+  }
+  .agent-window-bar { cursor: default; }
+  .agent-lines { display: none; }
+}
+
 @media (max-width: 720px) {
   .keybar { display: flex; }
   .app[data-tab="files"] .keybar { display: none; }

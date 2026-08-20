@@ -13,6 +13,8 @@ import {
   usagePopoverEl,
   usageBackdropEl,
   subagentOrbitEl,
+  agentWindowsEl,
+  agentLinesEl,
   subagentPopoverEl,
   subagentBackdropEl,
   tabTerminalEl,
@@ -42,6 +44,7 @@ import {
 } from './js/terminal.js';
 import { initUsage } from './js/usage.js';
 import { initSubagents, startSubagentDebug } from './js/subagents.js';
+import { initAgentWindows } from './js/agentWindows.js';
 import { showFiles, leaveFiles } from './js/files.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
@@ -376,13 +379,24 @@ const subagents = initSubagents({
   activeSessionId: () => openSessionId(currentProject?.sessions ?? []),
 });
 
+const agentWindows = initAgentWindows({
+  containerEl: agentWindowsEl,
+  lineEl: agentLinesEl,
+  sidebarEl: projectListEl,
+});
+
 const activeSessionIdForDebug = () => openSessionId(currentProject?.sessions ?? []);
 
 const eventSource = startEventStream(
   ({ tmuxSession, sessionId, state }) => {
     applyActivityState(tmuxSession, sessionId, state);
   },
-  (payload) => subagents.handleEvent(payload),
+  (payload) => {
+    subagents.handleEvent(payload);
+    // Open windows fetch what was appended and their line carries one
+    // pulse - the delta is the only signal that anything happened.
+    agentWindows.noteDelta(payload.sessionId, payload.agents ?? []);
+  },
 );
 
 if (new URLSearchParams(location.search).get('debug') === 'subagents') {
@@ -936,7 +950,11 @@ function buildSessionRow(project, session, fallbackAccountSelect) {
     '>' +
     svg('power', 'icon-symbol') +
     '</span>' +
-    `<span class="subagent-badge" data-session-id="${escapeHtml(session.id)}" hidden></span>` +
+    // Its own control at the right edge, not a cell in the grid: it glows
+    // while agents run in this session and opens their windows on a click,
+    // which the row's own click (open the session) must not do.
+    `<button class="btn-quiet session-agents-edge" data-session-id="${escapeHtml(session.id)}" hidden` +
+    ' title="Show the agents running in this session"></button>' +
     // Title and last prompt stacked. The prompt is omitted when it matches
     // the title - which is the case for every session that doesn't have an
     // ai-title yet, and the same text twice adds nothing.
@@ -1066,6 +1084,15 @@ function buildSessionRow(project, session, fallbackAccountSelect) {
       e.preventDefault();
       e.stopPropagation();
       endSession(project, session);
+    });
+  }
+  const edgeEl = row.querySelector('.session-agents-edge');
+  if (edgeEl) {
+    edgeEl.addEventListener('click', (e) => {
+      // Same reason as the end button above: without this the click would
+      // additionally hit the row and resume the session.
+      e.stopPropagation();
+      agentWindows.toggle(session.id, subagents.agentsOf(session.id));
     });
   }
   row.addEventListener('click', async () => {
@@ -1354,7 +1381,7 @@ function render(filter) {
   // the stream carries only deltas, so nothing else would put the counts
   // back. Same idiom as the activity dots, which buildSessionRow reads out
   // of measuredActivity for exactly this reason.
-  subagents.refreshBadges();
+  subagents.refreshEdges();
   updateOnboardingWizard(allAccounts(), projects);
   // What's on screen right now - the background tick compares against this.
   lastSignature = sessionSignature();

@@ -36,7 +36,7 @@ function toolLine(agent) {
 // side effects at an unpredictable point.
 export function initSubagents({
   orbitEl, popoverEl, backdropEl,
-  sessionRowSelector = (id) => document.querySelector(`.session-row[data-session-id="${id}"] .subagent-badge`),
+  sessionRowSelector = (id) => document.querySelector(`.session-row[data-session-id="${id}"] .session-agents-edge`),
   activeSessionId,
 }) {
   // sessionId -> Map(agentId -> agent snapshot with status)
@@ -131,21 +131,16 @@ export function initSubagents({
     });
   }
 
-  function updateBadge(sessionId, sessionAgents) {
-    const badge = sessionRowSelector(sessionId);
-    if (!badge) return;
-    // The badge is for the sessions you cannot see - the open one has the
-    // orbit, and counting the same agents twice on one screen reads as two
-    // different things happening.
-    const count = sessionId === activeSessionId()
-      ? 0
-      : [...sessionAgents.values()].filter((a) => a.status === 'active').length;
-    if (count === 0) {
-      badge.hidden = true;
-    } else {
-      badge.hidden = false;
-      badge.textContent = String(count);
-    }
+  // On every row, open session or not: the windows behind the edge work
+  // for a session you are not looking at just as well, which is where they
+  // earn their keep.
+  function updateEdge(sessionId, sessionAgents) {
+    const edge = sessionRowSelector(sessionId);
+    if (!edge) return;
+    const count = [...sessionAgents.values()].filter((a) => a.status === 'active').length;
+    edge.hidden = count === 0;
+    edge.dataset.count = String(count);
+    edge.textContent = count > 0 ? String(count) : '';
   }
 
   function handleEvent({ sessionId, agents }) {
@@ -174,17 +169,14 @@ export function initSubagents({
       }
     }
     known.set(sessionId, sessionAgents);
-    updateBadge(sessionId, sessionAgents);
+    updateEdge(sessionId, sessionAgents);
     if (activeSessionId() === sessionId) renderOrbit(sessionAgents);
   }
 
   function sessionOpened(sessionId) {
     closePopover();
     renderOrbit(known.get(sessionId) ?? new Map());
-    // Which row carries a badge just changed on both ends: the session
-    // opened loses its own, the one left behind gets it back. Neither is
-    // reported by the stream, so nothing else would re-apply them.
-    refreshBadges();
+    refreshEdges();
   }
 
   // No session is open any more. Its own name for it rather than
@@ -195,20 +187,25 @@ export function initSubagents({
   function close() {
     closePopover();
     renderOrbit(new Map());
-    // No session is open, so every session's badge is due again.
-    refreshBadges();
+    refreshEdges();
   }
 
   // render() in app.js rebuilds the whole session list, and every rebuilt
-  // badge comes back hidden. The stream only carries deltas, so nothing
+  // edge comes back hidden. The stream only carries deltas, so nothing
   // would re-apply a count until an agent's state actually changes - which
   // for a stable set of running agents may be never. Same idiom as the
   // activity dots: re-apply what is already known after a rebuild.
-  function refreshBadges() {
-    for (const [sessionId, sessionAgents] of known) updateBadge(sessionId, sessionAgents);
+  function refreshEdges() {
+    for (const [sessionId, sessionAgents] of known) updateEdge(sessionId, sessionAgents);
   }
 
-  return { handleEvent, sessionOpened, close, refreshBadges };
+  // A reader for this module's own state rather than the map itself - the
+  // window module needs the list, not the ability to change it.
+  function agentsOf(sessionId) {
+    return [...(known.get(sessionId)?.values() ?? [])];
+  }
+
+  return { handleEvent, sessionOpened, close, refreshEdges, agentsOf };
 }
 
 // ---------- Diagnostic overlay for the stream itself ----------
