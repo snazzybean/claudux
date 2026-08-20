@@ -70,13 +70,18 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       return el;
     }
     el.className = 'agent-block-tool';
+    // Call and result on separate lines. As siblings in one flex row the
+    // result became a third column and wrapped down the whole window.
+    const call = document.createElement('div');
+    call.className = 'agent-tool-call';
     const name = document.createElement('span');
     name.className = 'agent-tool-name';
     name.textContent = block.name;
     const detail = document.createElement('span');
     detail.className = 'agent-tool-detail';
     detail.textContent = block.detail ?? '';
-    el.append(name, detail);
+    call.append(name, detail);
+    el.appendChild(call);
     if (block.result) {
       const result = document.createElement('pre');
       result.className = 'agent-tool-result';
@@ -257,11 +262,16 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   function drawLines() {
     lineEl.replaceChildren();
     if (narrow()) return;
+    // Curves to windows in the same row would otherwise run as one bundle;
+    // a different attach height per window fans them apart.
+    const seen = new Map();
     for (const [agentId, entry] of open) {
       const anchor = anchorOf(entry.sessionId);
       if (!anchor) continue;
+      const fan = seen.get(entry.sessionId) ?? 0;
+      seen.set(entry.sessionId, fan + 1);
       const toX = entry.x;
-      const toY = entry.y + 16;
+      const toY = entry.y + 18 + fan * 12;
       const bend = Math.max(40, (toX - anchor.x) / 2);
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', `M ${anchor.x} ${anchor.y} C ${anchor.x + bend} ${anchor.y}, ${toX - bend} ${toY}, ${toX} ${toY}`);

@@ -2031,37 +2031,58 @@ button { cursor: pointer; }
   padding: var(--space-sm) var(--space-md);
   font-size: var(--fs-meta);
 }
-.agent-block-tool {
+.agent-block-tool { margin-bottom: var(--space-sm); }
+/* Tool name and argument on one line, the result under it. As flex siblings
+   the result became a third column and wrapped down the whole window. */
+.agent-tool-call {
   display: flex;
   gap: var(--space-sm);
 }
-.agent-tool-name { color: var(--live); }
+.agent-tool-name {
+  flex: 0 0 auto;
+  color: var(--live);
+}
 .agent-tool-detail {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Two lines of output, never more: what came back is a hint of what
+   happened, and one `wc -l` over a long path filled a third of the window
+   before this. */
 .agent-tool-result {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   margin: 0;
+  color: var(--text-muted);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
 }
 
-/* Never takes a pointer event - the windows above it and the sidebar
-   underneath it both have to stay operable. */
+/* Above the windows, not below: tiled windows sit close enough together
+   that every curve but the first one was hidden behind them, which is most
+   of the point of having them. Thin and faint enough to read the window
+   through, and it never takes a pointer event - the windows and the sidebar
+   both stay operable. */
 .agent-lines {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: 5;
+  z-index: 7;
   pointer-events: none;
 }
 .agent-line {
   fill: none;
   stroke: var(--live);
   stroke-width: 1.5;
-  opacity: 0.55;
+  opacity: 0.4;
   filter: drop-shadow(0 0 4px var(--live));
 }
 .agent-pulse {
