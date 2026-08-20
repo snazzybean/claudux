@@ -10,6 +10,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chooseTranscript, readTranscriptTail } from './contextUsage.js';
+import { readRegistry, reconcile } from './sessionRegistry.js';
+import { listTmuxSessions, aliveSessionNames } from './tmuxManager.js';
+import { getMeta, claudeSessionIdsForTmux } from './sessionMeta.js';
 
 // A session's own transcript sits at <projectDir>/<sessionId>.jsonl; its
 // subagents live in the sibling directory <projectDir>/<sessionId>/subagents.
@@ -181,4 +184,59 @@ export function diffSubagents(previous, snapshot) {
     if (changed) events.push(eventFor(a, status));
   }
   return { events, next };
+}
+
+// One pass over every running, claudux-managed session: snapshot its
+// subagents, diff against the previous tick, return only the sessions with
+// a change. Deliberately its own registry/tmux loop rather than sharing
+// runWatcherOnce's - that one also resolves accounts and sends
+// notifications, neither of which subagent tracking needs.
+export async function runSubagentWatcherOnce(config, state, {
+  registryFn = () => readRegistry(config.claudeHome),
+  listFn = () => listTmuxSessions(),
+  snapshotFn = (sessionIds) => subagentSnapshot(config.claudeHome, sessionIds),
+} = {}) {
+  const registry = registryFn();
+  const sessions = await listFn();
+  // Same reconcile statusWatcher.js runs, and for the same reason: without
+  // it, a session reassigned to a new id after /clear would leave
+  // claudeSessionIdsForTmux unaware of the new file, and subagentSnapshot
+  // would keep reading a subagents directory that stopped growing.
+  reconcile(config.dataDir, registry, sessions.map((s) => s.name));
+  const running = new Set(aliveSessionNames(sessions));
+
+  const events = [];
+  for (const [tmuxSession, entry] of registry) {
+    if (!running.has(tmuxSession)) continue;
+    const meta = getMeta(config.dataDir, tmuxSession);
+    if (!meta) continue; // not a session Claudux started
+    const sessionIds = claudeSessionIdsForTmux(config.dataDir, tmuxSession);
+    const snapshot = snapshotFn(sessionIds);
+    const { events: agentEvents, next } = diffSubagents(state.get(tmuxSession), snapshot);
+    state.set(tmuxSession, next);
+    if (agentEvents.length > 0) {
+      events.push({ tmuxSession, sessionId: entry.sessionId, agents: agentEvents });
+    }
+  }
+  // No leftovers, same reasoning as statusWatcher.js: otherwise this map
+  // grows for the process's whole lifetime.
+  for (const key of state.keys()) if (!running.has(key)) state.delete(key);
+  return events;
+}
+
+export function startSubagentWatcherInterval(config, {
+  intervalMs = 2000,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+  runFn = runSubagentWatcherOnce,
+  onEvents = () => {},
+} = {}) {
+  const state = new Map();
+  const timer = setIntervalFn(() => {
+    runFn(config, state)
+      .then(onEvents)
+      .catch((err) => console.error(`subagentWatcher: pass failed: ${err.message}`));
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearIntervalFn(timer);
 }

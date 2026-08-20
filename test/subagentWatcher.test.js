@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds, subagentSnapshot, diffSubagents } from '../src/lib/subagentWatcher.js';
+import { setMeta } from '../src/lib/sessionMeta.js';
+import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds, subagentSnapshot, diffSubagents, runSubagentWatcherOnce, startSubagentWatcherInterval } from '../src/lib/subagentWatcher.js';
 
 // Claude Code writes a session's own transcript at
 // <projectDir>/<sessionId>.jsonl and its subagents' transcripts at
@@ -208,4 +209,95 @@ test('diffSubagents reports two agents independently', () => {
   assert.equal(first.events.length, 2);
   const second = diffSubagents(first.next, [agent({ resolved: true }), agent({ agentId: 'bbb222' })]);
   assert.deepEqual(second.events.map((e) => e.agentId), ['aaa111']);
+});
+
+test('runSubagentWatcherOnce reports a new agent for a running, claudux-managed session', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const state = new Map();
+  const events = await runSubagentWatcherOnce(config, state, {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: false }],
+    snapshotFn: () => [agent()],
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].tmuxSession, 'carrier-1');
+  assert.equal(events[0].sessionId, 'sess-1');
+  assert.equal(events[0].agents[0].agentId, 'aaa111');
+});
+
+test('runSubagentWatcherOnce skips a tmux session claudux did not start', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  const config = { dataDir, claudeHome: '/unused' };
+  const state = new Map();
+  const events = await runSubagentWatcherOnce(config, state, {
+    registryFn: () => new Map([['other-1', { pid: 1, sessionId: 'sess-x', tmuxSession: 'other-1', cwd: '/srv/x', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'other-1', dead: false }],
+    snapshotFn: () => [agent()],
+  });
+  assert.deepEqual(events, []);
+});
+
+test('runSubagentWatcherOnce skips a dead carrier', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const state = new Map();
+  const events = await runSubagentWatcherOnce(config, state, {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: true, deadStatus: null, deadSignal: 9 }],
+    snapshotFn: () => [agent()],
+  });
+  assert.deepEqual(events, []);
+});
+
+test('runSubagentWatcherOnce emits nothing on a second tick with no change', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const state = new Map();
+  const deps = {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: false }],
+    snapshotFn: () => [agent()],
+  };
+  await runSubagentWatcherOnce(config, state, deps);
+  const events = await runSubagentWatcherOnce(config, state, deps);
+  assert.deepEqual(events, []);
+});
+
+test('runSubagentWatcherOnce forgets state for a carrier that stopped running', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-saw-'));
+  setMeta(dataDir, 'carrier-1', { accountId: 'id-1', projectId: 'proj-1' });
+  const config = { dataDir, claudeHome: '/unused' };
+  const state = new Map();
+  await runSubagentWatcherOnce(config, state, {
+    registryFn: () => new Map([['carrier-1', { pid: 1, sessionId: 'sess-1', tmuxSession: 'carrier-1', cwd: '/srv/project', status: 'busy', statusUpdatedAt: 1 }]]),
+    listFn: async () => [{ name: 'carrier-1', dead: false }],
+    snapshotFn: () => [agent()],
+  });
+  assert.equal(state.size, 1);
+  await runSubagentWatcherOnce(config, state, {
+    registryFn: () => new Map(),
+    listFn: async () => [],
+    snapshotFn: () => [],
+  });
+  assert.equal(state.size, 0);
+});
+
+test('startSubagentWatcherInterval polls on the given interval and forwards events', async () => {
+  const calls = [];
+  let tick;
+  const stop = startSubagentWatcherInterval({ dataDir: '/unused', claudeHome: '/unused' }, {
+    intervalMs: 5,
+    setIntervalFn: (fn) => { tick = fn; return 'timer'; },
+    clearIntervalFn: () => { calls.push('cleared'); },
+    runFn: async () => [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [] }],
+    onEvents: (events) => calls.push(events),
+  });
+  await tick();
+  assert.deepEqual(calls[0], [{ tmuxSession: 'carrier-1', sessionId: 'sess-1', agents: [] }]);
+  stop();
+  assert.equal(calls[1], 'cleared');
 });
