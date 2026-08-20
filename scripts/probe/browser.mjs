@@ -6,7 +6,16 @@
 import fs from 'node:fs';
 import { chromium } from '/root/.npm/_npx/705bc6b22212b352/node_modules/playwright/index.mjs';
 
-const [, , PORT = '4098', OUT = '/tmp/probe', SIZE = '1999x1491', PROJECT = 'roommind', TRANSCRIPT = ''] = process.argv;
+// The project has to be named: it is the one whose session the fixture gave
+// agents to, and no other project in the list has any. There is deliberately
+// no default - a real project name has no business in this repo (see
+// CLAUDE.md), and guessing the first entry would just time out somewhere
+// less obvious.
+const [, , PORT = '4098', OUT = '/tmp/probe', SIZE = '1999x1491', PROJECT = '', TRANSCRIPT = ''] = process.argv;
+if (!PROJECT) {
+  console.error('Aufruf: node scripts/probe/browser.mjs <port> <out> <BxH> <Projekt> [transcript]');
+  process.exit(1);
+}
 const [W, H] = SIZE.split('x').map(Number);
 
 const browser = await chromium.launch();
