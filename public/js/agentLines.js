@@ -40,12 +40,44 @@ function glowDefs() {
   return defs;
 }
 
-// A curve that leaves the row horizontally and arrives at the window
-// horizontally, so it reads as a cable rather than as a straight shot. The
-// bend grows with the distance: a short connection with a long bend loops.
-function pathBetween(from, to) {
-  const bend = Math.max(40, Math.abs(to.x - from.x) / 2);
-  return `M ${from.x} ${from.y} C ${from.x + bend} ${from.y}, ${to.x - bend} ${to.y}, ${to.x} ${to.y}`;
+// Where a line may meet a window, and which way it has to leave from there.
+// Four sockets rather than one fixed corner: a window above the row is met
+// at its underside, one below it at its top, and one straight out to the
+// right on its left edge - so the curve arrives along the window's own edge
+// instead of cutting across it or across the windows in between.
+const SOCKETS = [
+  { at: (box) => ({ x: box.x, y: box.y + box.height / 2 }), out: { x: -1, y: 0 } },
+  { at: (box) => ({ x: box.x + box.width, y: box.y + box.height / 2 }), out: { x: 1, y: 0 } },
+  { at: (box) => ({ x: box.x + box.width / 2, y: box.y }), out: { x: 0, y: -1 } },
+  { at: (box) => ({ x: box.x + box.width / 2, y: box.y + box.height }), out: { x: 0, y: 1 } },
+];
+
+const MIN_BEND = 55;
+const MAX_BEND = 170;
+
+// The socket nearest the row wins, which is also the one whose edge faces
+// it - and it is recomputed on every draw, so dragging a window to the other
+// side of the screen moves the connection to the side that now faces back.
+function socketFor(box, anchor) {
+  let best = null;
+  for (const socket of SOCKETS) {
+    const point = socket.at(box);
+    const distance = (point.x - anchor.x) ** 2 + (point.y - anchor.y) ** 2;
+    if (!best || distance < best.distance) best = { point, out: socket.out, distance };
+  }
+  return best;
+}
+
+// A curve that leaves the row horizontally - the edge it starts from is a
+// vertical strip, so out of it means to the right - and arrives along the
+// socket's own direction. The bend grows with the distance: a short
+// connection with a long bend loops back on itself.
+function pathTo(anchor, box) {
+  const socket = socketFor(box, anchor);
+  const bend = Math.min(MAX_BEND, Math.max(MIN_BEND, Math.sqrt(socket.distance) / 2));
+  const c1 = { x: anchor.x + bend, y: anchor.y };
+  const c2 = { x: socket.point.x + socket.out.x * bend, y: socket.point.y + socket.out.y * bend };
+  return `M ${anchor.x} ${anchor.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${socket.point.x} ${socket.point.y}`;
 }
 
 export function initAgentLines(svgEl) {
@@ -58,13 +90,15 @@ export function initAgentLines(svgEl) {
   // same curve without looking it up in the DOM.
   const paths = new Map();
 
+  // One connection per open window: `{ agentId, anchor, box }`. The socket is
+  // chosen here rather than passed in, so a caller that moves a window only
+  // has to draw again.
   function draw(connections) {
     group.replaceChildren();
     paths.clear();
-    for (const { agentId, from, to } of connections) {
-      const d = pathBetween(from, to);
-      const path = element('path', { d, class: 'agent-line' });
-      group.appendChild(path);
+    for (const { agentId, anchor, box } of connections) {
+      const d = pathTo(anchor, box);
+      group.appendChild(element('path', { d, class: 'agent-line' }));
       paths.set(agentId, d);
     }
   }

@@ -12,16 +12,22 @@
 // limited by its narrower side on both, so a row near the top of the sidebar
 // produced a flat arc with everything clamped against the top edge.
 
-const WINDOW_WIDTH = 360;
-const MIN_HEIGHT = 180;
-const MAX_HEIGHT = 420;
+// Small enough that a screenful of them still fits side by side: six tall
+// windows overlap whatever shape they are arranged in, and the overlap was
+// what made the arc look cramped rather than the arc itself.
+const WINDOW_WIDTH = 320;
+const MIN_HEIGHT = 150;
+const MAX_HEIGHT = 290;
 const GAP = 12;
 const MIN_RADIUS = 220;
 const MAX_RADIUS = 460;
 // Half the widest opening of the fan. Whether it gets that far depends on the
 // room above and below the row.
 const HALF_OPENING = (62 * Math.PI) / 180;
-// Vertical distance two windows need for both title bars to stay readable.
+// The vertical distance two windows need for both title bars to stay
+// readable. Only reached when the fan is too full to keep them clear of each
+// other altogether - the preferred separation is a whole window plus a gap,
+// which is to say no overlap at all.
 const MIN_SEPARATION = 96;
 // How far a window may sit off its slot, as a share of the slot's own width.
 // Evenly spaced windows are what read as a mechanism - the point of this is
@@ -49,10 +55,10 @@ function wobbleOf(agentId) {
 
 function geometryFor(anchor, viewport) {
   const usable = viewport.height - 2 * GAP;
-  // At most half the screen: every pixel of window height is a pixel the fan
-  // has not got to open in, and a screen full of tall windows has no arc,
-  // only a column.
-  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.floor(usable / 2.2)));
+  // A third of the screen at most: every pixel of window height is a pixel
+  // the fan has not got to open in, and a screen full of tall windows has no
+  // arc, only a column.
+  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.floor(usable / 3)));
   const radius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, viewport.width - anchor.x - WINDOW_WIDTH - GAP));
   const reach = (room) => Math.asin(Math.min(1, Math.max(0, room / radius)));
   return {
@@ -83,9 +89,15 @@ export function arcPlacement(agentIds, anchor, viewport) {
     return Math.min(to, Math.max(from, base + wobbleOf(agentId).slot * SLOT_WOBBLE * slotWidth));
   });
   // The wobble is free to push two windows towards each other, so the
-  // minimum separation is enforced afterwards rather than hoped for: pushed
-  // apart in order, since the last one may run into the end of the fan.
-  const minSine = MIN_SEPARATION / radius;
+  // separation is enforced afterwards rather than hoped for: pushed apart in
+  // order, since the last one may run into the end of the fan.
+  //
+  // What is enforced is a whole window plus a gap where the fan has room for
+  // it - no overlap at all - and only as much as the fan can give when it
+  // does not, down to the floor where two title bars still read.
+  const roomy = (radius * (Math.sin(to) - Math.sin(from))) / slots;
+  const wanted = Math.max(MIN_SEPARATION, Math.min(height + GAP, roomy));
+  const minSine = wanted / radius;
   for (let i = 1; i < angles.length; i += 1) {
     const needed = Math.asin(Math.min(1, Math.sin(angles[i - 1]) + minSine));
     if (angles[i] < needed) angles[i] = Math.min(to, needed);

@@ -119,20 +119,14 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       lines.clear();
       return;
     }
-    // Each window gets its own attach height, so several leaving the same
-    // edge fan apart instead of bundling into one stroke.
-    const fanned = new Map();
+    // Which side of a window a line meets is agentLines.js's decision, from
+    // the box and the anchor - it changes as soon as a window is dragged
+    // somewhere else, so there is nothing to keep in step here.
     const connections = [];
     for (const entry of open.values()) {
       const anchor = anchorOf(entry.sessionId);
       if (!anchor || !entry.box) continue;
-      const rank = fanned.get(entry.sessionId) ?? 0;
-      fanned.set(entry.sessionId, rank + 1);
-      connections.push({
-        agentId: entry.agentId,
-        from: anchor,
-        to: { x: entry.box.x, y: entry.box.y + 18 + rank * 12 },
-      });
+      connections.push({ agentId: entry.agentId, anchor, box: entry.box });
     }
     lines.draw(connections);
   }
