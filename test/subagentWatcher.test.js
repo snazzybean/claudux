@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds, subagentSnapshot } from '../src/lib/subagentWatcher.js';
+import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds, subagentSnapshot, diffSubagents } from '../src/lib/subagentWatcher.js';
 
 // Claude Code writes a session's own transcript at
 // <projectDir>/<sessionId>.jsonl and its subagents' transcripts at
@@ -151,4 +151,61 @@ test('subagentSnapshot skips a meta.json without a matching jsonl instead of thr
 
   const [agent] = subagentSnapshot(claudeHome, ['sess-1']);
   assert.equal(agent.currentTool, null);
+});
+
+function agent(overrides) {
+  return {
+    agentId: 'aaa111', agentType: 'general-purpose', description: 'Explore', spawnDepth: 1,
+    currentTool: { name: 'Grep', input: { pattern: 'auth' } }, resolved: false,
+    ...overrides,
+  };
+}
+
+test('diffSubagents reports a brand-new agent', () => {
+  const { events, next } = diffSubagents(undefined, [agent()]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].agentId, 'aaa111');
+  assert.equal(events[0].status, 'active');
+  assert.equal(next.get('aaa111').status, 'active');
+});
+
+test('diffSubagents stays quiet when nothing changed', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const second = diffSubagents(first.next, [agent()]);
+  assert.deepEqual(second.events, []);
+});
+
+test('diffSubagents reports a changed current tool as the same agent, still active', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const second = diffSubagents(first.next, [agent({ currentTool: { name: 'Read', input: { file_path: 'x.js' } } })]);
+  assert.equal(second.events.length, 1);
+  assert.equal(second.events[0].status, 'active');
+  assert.equal(second.events[0].currentTool.name, 'Read');
+});
+
+test('diffSubagents reports the transition to done exactly once', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const second = diffSubagents(first.next, [agent({ resolved: true })]);
+  assert.equal(second.events.length, 1);
+  assert.equal(second.events[0].status, 'done');
+
+  // The regression this guards against: a naive implementation that drops
+  // 'done' agents from `next` instead of keeping them would see no `prior`
+  // on this third tick and re-report 'done' as if the agent were new again.
+  const third = diffSubagents(second.next, [agent({ resolved: true })]);
+  assert.deepEqual(third.events, []);
+});
+
+test('diffSubagents ignores a further tool change after an agent is done', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const second = diffSubagents(first.next, [agent({ resolved: true })]);
+  const third = diffSubagents(second.next, [agent({ resolved: true, currentTool: { name: 'Bash', input: {} } })]);
+  assert.deepEqual(third.events, [], 'a done agent writes no more lines - a changed tool here would be stale data');
+});
+
+test('diffSubagents reports two agents independently', () => {
+  const first = diffSubagents(undefined, [agent(), agent({ agentId: 'bbb222' })]);
+  assert.equal(first.events.length, 2);
+  const second = diffSubagents(first.next, [agent({ resolved: true }), agent({ agentId: 'bbb222' })]);
+  assert.deepEqual(second.events.map((e) => e.agentId), ['aaa111']);
 });

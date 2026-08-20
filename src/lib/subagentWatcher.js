@@ -145,3 +145,40 @@ export function subagentSnapshot(claudeHome, sessionIds) {
   }
   return agents;
 }
+
+function toolKeyOf(agent) {
+  return agent.currentTool ? `${agent.currentTool.name}:${JSON.stringify(agent.currentTool.input)}` : null;
+}
+
+function eventFor(agent, status) {
+  return {
+    agentId: agent.agentId,
+    agentType: agent.agentType,
+    description: agent.description,
+    spawnDepth: agent.spawnDepth,
+    currentTool: agent.currentTool,
+    status,
+  };
+}
+
+// Compares a fresh snapshot against what the previous tick knew.
+//
+// A `done` agent stays in `next` with that status FOREVER (for the life of
+// this process's state Map) rather than being dropped - see the task
+// description above for why dropping it re-fires the event forever.
+export function diffSubagents(previous, snapshot) {
+  const previousMap = previous ?? new Map();
+  const next = new Map();
+  const events = [];
+  for (const a of snapshot) {
+    const status = a.resolved ? 'done' : 'active';
+    const toolKey = toolKeyOf(a);
+    const prior = previousMap.get(a.agentId);
+    // Once an agent is done its own file writes nothing further - comparing
+    // toolKey there would only ever compare against itself.
+    const changed = !prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey);
+    next.set(a.agentId, { status, toolKey });
+    if (changed) events.push(eventFor(a, status));
+  }
+  return { events, next };
+}
