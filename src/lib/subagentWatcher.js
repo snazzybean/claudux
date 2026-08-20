@@ -130,7 +130,10 @@ const SILENT_DONE_MS = 10 * 60 * 1000;
 // finished, because that verdict is sticky.
 const REGISTRY_GRACE_MS = 3000;
 
-function agentIsResolved(claudeHome, dir, meta, sessionResolved, ownTranscript, tracker, silentForMs) {
+function agentIsResolved(claudeHome, dir, meta, sessionResolved, ownTranscript, tracker, silentForMs, superseded) {
+  // A newer agent carries this one's name now, so the team's entry is not
+  // about this instance - and a team never holds two of a name at once.
+  if (superseded) return true;
   // A named agent records no tool_result anywhere, so its own transcript
   // used to be the only evidence - and "no tool_use in the last turn"
   // cannot tell an answer from a remark between two tool calls. The team
@@ -187,14 +190,20 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
     resolved = new Set();
   }
 
-  const agents = [];
+  // Read first, decided after: the team registry knows a teammate by name
+  // alone, so which agent a listed name refers to can only be settled once
+  // every meta in the directory has been seen.
+  const read = [];
   for (const file of files) {
     const match = AGENT_META_RE.exec(file);
     if (!match) continue;
     const agentId = match[1];
+    const metaPath = path.join(dir, file);
     let meta;
+    let bornAt;
     try {
-      meta = parseAgentMeta(fs.readFileSync(path.join(dir, file), 'utf8'));
+      meta = parseAgentMeta(fs.readFileSync(metaPath, 'utf8'));
+      bornAt = fs.statSync(metaPath).mtimeMs;
     } catch {
       continue;
     }
@@ -212,17 +221,32 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
       // The jsonl hasn't been written yet, or was read mid-write - the
       // agent still shows up, just without a current tool.
     }
-    agents.push({
-      agentId,
-      agentType: meta.agentType,
-      description: meta.description,
-      spawnDepth: meta.spawnDepth,
-      currentTool: currentToolFromAgentTranscript(ownTranscript),
-      resolved: agentIsResolved(claudeHome, dir, meta, resolved, ownTranscript, tracker, silentForMs),
-      silent: silentForMs >= SILENT_DONE_MS,
-    });
+    read.push({ agentId, meta, bornAt, ownTranscript, silentForMs });
   }
-  return agents;
+
+  const nameKey = (meta) => (meta.name && meta.teamName ? `${meta.teamName}\n${meta.name}` : null);
+  // The newest agent per name in a team, so a second run under the same
+  // name cannot make the first one look alive again.
+  const newestOfName = new Map();
+  for (const entry of read) {
+    const key = nameKey(entry.meta);
+    if (!key) continue;
+    if (!(newestOfName.get(key) >= entry.bornAt)) newestOfName.set(key, entry.bornAt);
+  }
+
+  return read.map((entry) => {
+    const key = nameKey(entry.meta);
+    const superseded = key !== null && newestOfName.get(key) > entry.bornAt;
+    return {
+      agentId: entry.agentId,
+      agentType: entry.meta.agentType,
+      description: entry.meta.description,
+      spawnDepth: entry.meta.spawnDepth,
+      currentTool: currentToolFromAgentTranscript(entry.ownTranscript),
+      resolved: agentIsResolved(claudeHome, dir, entry.meta, resolved, entry.ownTranscript, tracker, entry.silentForMs, superseded),
+      silent: entry.silentForMs >= SILENT_DONE_MS,
+    };
+  });
 }
 
 function toolKeyOf(agent) {

@@ -747,3 +747,26 @@ test('subagentSnapshot falls back to the transcript when there is no team regist
   const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
   assert.equal(agentRow.resolved, true);
 });
+
+// The registry knows a teammate by name alone, while its files carry a
+// hash - so a second agent spawned under the same name in the same session
+// would make the first one look alive again, and after a restart that is a
+// first sighting, hence an event, a window and a glowing edge.
+test('subagentSnapshot credits a team entry to the newest agent of that name only', () => {
+  const { claudeHome, subagentsDir } = sessionFixture();
+  teamFixture(claudeHome, 'session-abc', ['team-lead', 'Vermessung']);
+  const meta = { agentType: 'Vermessung', name: 'Vermessung', teamName: 'session-abc', taskKind: 'in_process_teammate', spawnDepth: 0 };
+  const turn = [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }];
+  writeAgent(subagentsDir, 'aVermessung-1111111111111111', meta, turn);
+  writeAgent(subagentsDir, 'aVermessung-2222222222222222', meta, turn);
+
+  // The first run finished long ago; the second is the one the team lists.
+  const old = new Date(Date.now() - 60_000);
+  for (const suffix of ['meta.json', 'jsonl']) {
+    fs.utimesSync(path.join(subagentsDir, `agent-aVermessung-1111111111111111.${suffix}`), old, old);
+  }
+
+  const byId = new Map(subagentSnapshot(claudeHome, ['sess-1']).map((a) => [a.agentId, a]));
+  assert.equal(byId.get('aVermessung-1111111111111111').resolved, true);
+  assert.equal(byId.get('aVermessung-2222222222222222').resolved, false);
+});
