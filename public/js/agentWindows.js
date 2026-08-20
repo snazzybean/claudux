@@ -15,16 +15,24 @@ import { svg } from './icons.js';
 
 // Six at once. Beyond that the terminal disappears behind windows - one
 // session in this project's own history had 46 agents in its directory.
+// The upper bound; how many actually fit is decided by the screen (see
+// gridFor). One session in this project's own history had 46 agents in its
+// directory.
 const MAX_WINDOWS = 6;
-// Far enough from the edge that the curve between them is visible - the
-// lines sit under the windows, so a window starting right at its anchor
-// hides its own line.
-const CASCADE_START_X = 96;
-const CASCADE_STEP_X = 28;
-// Bigger than the title bar, so the bar of every window behind stays
-// readable - the point of a cascade.
-const CASCADE_STEP_Y = 38;
 const WINDOW_WIDTH = 360;
+const MIN_WINDOW_WIDTH = 260;
+// Below this a window shows a title bar and barely two lines, which is not
+// worth a tile. Above the upper bound a single row would run the full height
+// of the screen for a conversation that is a few lines long.
+const MIN_WINDOW_HEIGHT = 180;
+const MAX_WINDOW_HEIGHT = 420;
+const GAP = 12;
+// Distance from the row, so the curve between them is visible at all: the
+// lines are drawn under the windows, and a window starting at its own
+// anchor hides its own line. Dropped on a narrow screen, where that space
+// is the difference between one column and none.
+const ANCHOR_GAP = 96;
+const ANCHOR_GAP_TIGHT = 24;
 // A finished agent's window stays long enough to see that it finished, and
 // to take in its last lines, then retracts by itself. Leaving it would fill
 // the screen with windows that nothing is happening in any more.
@@ -99,17 +107,63 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     if (atBottom) body.scrollTop = body.scrollHeight;
   }
 
-  function place(entry) {
+  function place(entry, width = entry.el.offsetWidth || WINDOW_WIDTH) {
     if (narrow()) return;
     // Clamped so a window cannot end up off screen - after a resize, or
     // after being dragged past an edge.
-    const maxX = Math.max(0, window.innerWidth - WINDOW_WIDTH - 8);
+    const maxX = Math.max(0, window.innerWidth - width - GAP);
     const maxY = Math.max(0, window.innerHeight - 80);
     entry.x = Math.min(Math.max(entry.x, 0), maxX);
     entry.y = Math.min(Math.max(entry.y, 0), maxY);
     entry.el.style.left = `${entry.x}px`;
     entry.el.style.top = `${entry.y}px`;
     drawLines();
+  }
+
+  // Spread over the area right of the row rather than cascaded from it: a
+  // cascade of six 360px windows is six windows on top of each other, and
+  // the whole point is seeing several agents at once.
+  //
+  // The screen decides the grid, not the other way round. As many columns
+  // as fit at the preferred width, the rest as rows, and never more rows
+  // than a readable window height allows - so a narrow screen gets fewer,
+  // fully visible windows instead of a pile.
+  function gridFor(sessionId, count) {
+    const anchor = anchorOf(sessionId);
+    const areaHeight = window.innerHeight - 2 * GAP;
+    const maxRows = Math.max(1, Math.floor((areaHeight + GAP) / (MIN_WINDOW_HEIGHT + GAP)));
+    const wideEnough = window.innerWidth - (anchor?.x ?? 0) - ANCHOR_GAP - GAP >= 2 * (MIN_WINDOW_WIDTH + GAP);
+    const left = (anchor?.x ?? 0) + (wideEnough ? ANCHOR_GAP : ANCHOR_GAP_TIGHT);
+    const areaWidth = window.innerWidth - left - GAP;
+    const columns = Math.max(1, Math.min(count, Math.floor((areaWidth + GAP) / (WINDOW_WIDTH + GAP))));
+    const rows = Math.min(maxRows, Math.ceil(count / columns));
+    return {
+      left,
+      columns,
+      rows,
+      capacity: columns * maxRows,
+      width: Math.min(WINDOW_WIDTH, Math.max(MIN_WINDOW_WIDTH, Math.floor((areaWidth + GAP) / columns) - GAP)),
+      height: Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, Math.floor((areaHeight + GAP) / rows) - GAP)),
+    };
+  }
+
+  // How many windows this screen can show at once without stacking them.
+  function capacityFor(sessionId) {
+    return narrow() ? MAX_WINDOWS : Math.min(MAX_WINDOWS, gridFor(sessionId, MAX_WINDOWS).capacity);
+  }
+
+  function layout(sessionId) {
+    if (narrow()) return;
+    const mine = [...open.values()].filter((entry) => entry.sessionId === sessionId && !entry.moved);
+    if (mine.length === 0) return;
+    const grid = gridFor(sessionId, mine.length);
+    mine.forEach((entry, index) => {
+      entry.x = grid.left + (index % grid.columns) * (grid.width + GAP);
+      entry.y = GAP + Math.floor(index / grid.columns) * (grid.height + GAP);
+      entry.el.style.width = `${grid.width}px`;
+      entry.el.style.height = `${grid.height}px`;
+      place(entry, grid.width);
+    });
   }
 
   function makeDraggable(entry, bar) {
@@ -121,6 +175,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       bar.setPointerCapture(event.pointerId);
       const grabX = event.clientX - entry.x;
       const grabY = event.clientY - entry.y;
+      entry.moved = true;
       const move = (e) => {
         entry.x = e.clientX - grabX;
         entry.y = e.clientY - grabY;
@@ -137,7 +192,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     });
   }
 
-  function openWindow(sessionId, agent, index) {
+  function openWindow(sessionId, agent) {
     const anchor = anchorOf(sessionId);
     const el = document.createElement('div');
     el.className = 'agent-window';
@@ -153,8 +208,11 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       el,
       sessionId,
       offset: 0,
-      x: (anchor?.x ?? 0) + CASCADE_START_X + index * CASCADE_STEP_X,
-      y: (anchor?.y ?? 0) + index * CASCADE_STEP_Y,
+      x: (anchor?.x ?? 0) + ANCHOR_GAP,
+      y: GAP,
+      // Set once this window has been dragged: layout() leaves it alone
+      // from then on, so a placement by hand survives the next one.
+      moved: false,
     };
     open.set(agent.agentId, entry);
     place(entry);
@@ -236,8 +294,9 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       for (const [agentId, entry] of [...open] ) if (entry.sessionId === sessionId) closeWindow(agentId);
       return;
     }
-    agents.filter((a) => a.status === 'active').slice(0, MAX_WINDOWS)
-      .forEach((agent, index) => openWindow(sessionId, agent, index));
+    agents.filter((a) => a.status === 'active').slice(0, capacityFor(sessionId))
+      .forEach((agent) => openWindow(sessionId, agent));
+    layout(sessionId);
   }
 
   function noteDelta(sessionId, agents) {
@@ -255,9 +314,10 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       // too. Without this, only what was running at the moment of the click
       // ever appeared, and the next agent stayed invisible behind a count
       // that had already gone up.
-      if (showing > 0 && agent.status === 'active' && placed < MAX_WINDOWS) {
-        openWindow(sessionId, agent, placed);
+      if (showing > 0 && agent.status === 'active' && placed < capacityFor(sessionId)) {
+        openWindow(sessionId, agent);
         placed += 1;
+        layout(sessionId);
       }
     }
   }
@@ -288,6 +348,9 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   }
 
   window.addEventListener('resize', () => {
+    // Re-tiled rather than only clamped: the number of columns that fit has
+    // probably changed. A window placed by hand keeps its spot.
+    for (const sessionId of new Set([...open.values()].map((entry) => entry.sessionId))) layout(sessionId);
     for (const entry of open.values()) place(entry);
     drawLines();
   });
