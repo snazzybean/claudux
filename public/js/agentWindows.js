@@ -12,7 +12,7 @@
 // motion.js - three things that were in here and each grew a name of their
 // own.
 import { svg } from './icons.js';
-import { layoutFor, layoutCapacity, clampBox, stubFor, trunkFor } from './agentLayout.js';
+import { layoutFor, layoutCapacity, clampBox, routesFor } from './agentLayout.js';
 import { initAgentLines } from './agentLines.js';
 import { boxOf, flipFrom, springEasing, staggerDelay } from './motion.js';
 
@@ -27,6 +27,9 @@ const CLOSE_AFTER_DONE_MS = 4000;
 // room to place a window by hand - they stack instead. Same breakpoint every
 // other narrow rule in styles.css uses.
 const NARROW_PX = 720;
+// A pointer has to travel this far before it counts as a drag rather than a
+// click.
+const DRAG_THRESHOLD_PX = 4;
 const OPEN_MS = 420;
 const CLOSE_MS = 220;
 
@@ -34,6 +37,10 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
   const lines = initAgentLines(lineEl);
   // agentId -> { el, agentId, sessionId, offset, box, moved, closing }
   const open = new Map();
+  // Agents whose window was closed by hand. Without this, the next delta
+  // reopened it a moment later - the rule that gives a newly started agent a
+  // window cannot tell "new" from "dismissed" on its own.
+  const dismissed = new Set();
   const spring = springEasing();
 
   const narrow = () => window.innerWidth <= NARROW_PX;
@@ -129,19 +136,25 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       lines.clear();
       return;
     }
-    // Read from the boxes as they are right now rather than from the layout:
-    // a window dragged anywhere - including across the trunk, which flips
-    // which edge it is met on - takes its stub along, with no state to keep
-    // in step.
+    // One call with every session's routes: drawing per session wiped the
+    // previous session's lines, and with nothing open the loop body never ran
+    // at all, which left the last lines on screen after their windows had
+    // gone.
+    const routes = [];
     for (const [sessionId, entries] of bySession()) {
       const anchor = anchorOf(sessionId);
       const placed = entries.filter((entry) => entry.box);
       if (!anchor || placed.length === 0) continue;
-      lines.draw({
-        trunk: trunkFor(placed.map((entry) => entry.box), anchor),
-        stubs: placed.map((entry) => ({ agentId: entry.agentId, ...stubFor(entry.box, anchor) })),
-      });
+      const byBox = new Map(placed.map((entry) => [entry.box, entry.agentId]));
+      for (const route of routesFor(placed.map((entry) => entry.box), anchor)) {
+        routes.push({
+          agentId: byBox.get(route.box),
+          entry: route.entry,
+          lane: { ...route.lane, fromX: anchor.x, fromY: anchor.y },
+        });
+      }
     }
+    lines.draw(routes);
   }
 
   // Re-places every window of a session that has not been moved by hand, and
@@ -161,6 +174,17 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
     drawLines();
   }
 
+  // Windows overlap, and a covered one has to be reachable: any touch of a
+  // window puts it on top. By z-index rather than by moving the element -
+  // re-inserting a node between pointerdown and click swallows the click, so
+  // raising a window by re-appending it made its own close button stop
+  // working, which is how the probe found this.
+  let topZ = 0;
+  function raise(entry) {
+    topZ += 1;
+    entry.el.style.zIndex = String(topZ);
+  }
+
   function makeDraggable(entry, bar) {
     bar.addEventListener('pointerdown', (event) => {
       // The close button lives in the bar and has to stay a button.
@@ -168,12 +192,19 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       if (narrow()) return;
       event.preventDefault();
       bar.setPointerCapture(event.pointerId);
-      // From here on layout() leaves this window alone, so a placement by
-      // hand survives the next re-arrangement.
-      entry.moved = true;
       const grabX = event.clientX - entry.box.x;
       const grabY = event.clientY - entry.box.y;
+      const startX = event.clientX;
+      const startY = event.clientY;
       const move = (e) => {
+        // A click on the bar is a pointerdown and a pointerup in the same
+        // spot; only real movement counts as a drag. Without the threshold,
+        // clicking a window to bring it forward pinned it out of the layout
+        // for good.
+        if (!entry.moved && Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) < DRAG_THRESHOLD_PX) return;
+        // From here on layout() leaves this window alone, so a placement by
+        // hand survives the next re-arrangement.
+        entry.moved = true;
         applyBox(entry, clampBox({ ...entry.box, x: e.clientX - grabX, y: e.clientY - grabY }, viewport()));
         drawLines();
       };
@@ -214,14 +245,18 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
         { duration: OPEN_MS, delay: staggerDelay(index), easing: spring, fill: 'backwards' },
       );
     }
-    el.querySelector('.agent-window-close').addEventListener('click', () => closeWindow(agent.agentId));
+    el.querySelector('.agent-window-close').addEventListener('click', () => closeWindow(agent.agentId, { dismiss: true }));
+    // Capture, so a window comes forward even when the click lands on
+    // something inside it that stops the event.
+    el.addEventListener('pointerdown', () => raise(entry), { capture: true });
     makeDraggable(entry, el.querySelector('.agent-window-bar'));
     loadInto(entry);
   }
 
-  function closeWindow(agentId) {
+  function closeWindow(agentId, { dismiss = false } = {}) {
     const entry = open.get(agentId);
     if (!entry) return;
+    if (dismiss) dismissed.add(agentId);
     const anchor = anchorOf(entry.sessionId);
     open.delete(agentId);
     const done = () => {
@@ -262,9 +297,12 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
 
   function toggle(sessionId, agents) {
     if (entriesOf(sessionId).length > 0) {
+      // Closing the set is not dismissing its agents: opening it again is
+      // meant to show everything that is running, not what survived.
       for (const entry of entriesOf(sessionId)) closeWindow(entry.agentId);
       return;
     }
+    for (const agent of agents) dismissed.delete(agent.agentId);
     agents.filter((agent) => agent.status === 'active').slice(0, capacityFor(sessionId))
       .forEach((agent, index) => openWindow(sessionId, agent, index));
     // No FLIP on the first placement: the windows are already arriving from
@@ -289,7 +327,7 @@ export function initAgentWindows({ containerEl, lineEl, sidebarEl }) {
       // too. Without this, only what was running at the moment of the click
       // ever appeared, and the next agent stayed invisible behind a count
       // that had already gone up.
-      if (showing > 0 && agent.status === 'active' && placed < capacityFor(sessionId)) {
+      if (showing > 0 && agent.status === 'active' && !dismissed.has(agent.agentId) && placed < capacityFor(sessionId)) {
         openWindow(sessionId, agent, 0);
         placed += 1;
         layout(sessionId);

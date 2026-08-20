@@ -1981,10 +1981,14 @@ button { cursor: pointer; }
 /* One window per running subagent, dragged out of its session's row edge.
    Fixed rather than absolute: dragging happens in viewport coordinates,
    and so does the line overlay they are connected to. */
+/* Above .panel-overlay (21 on the desktop breakpoint), or the terminal's own
+   tab bar swallows every click that lands on a window over it - found by a
+   click that could not reach a close button. Below .toast (30) and the copy
+   menu (40), which have to stay reachable over anything. */
 .agent-windows {
   position: fixed;
   inset: 0;
-  z-index: 6;
+  z-index: 22;
   pointer-events: none;
 }
 /* Size and position both come from agentArc.js by way of inline styles -
@@ -2077,7 +2081,10 @@ button { cursor: pointer; }
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: 7;
+  /* One above the windows: tiled windows sit close enough together that a
+     line drawn underneath them is hidden by the next one, which is most of
+     the point of drawing it. */
+  z-index: 23;
   pointer-events: none;
 }
 /* A dash pattern travelling along the stroke: the connection itself reads

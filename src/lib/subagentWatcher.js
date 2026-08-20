@@ -196,7 +196,7 @@ function toolKeyOf(agent) {
 // what the session's transcript says it wrote to, and an agent writing back
 // does it with a SendMessage tool call of its own, which is already its
 // current tool.
-function eventFor(agent, status, messaged) {
+function eventFor(agent, status, signal) {
   return {
     agentId: agent.agentId,
     agentType: agent.agentType,
@@ -204,7 +204,7 @@ function eventFor(agent, status, messaged) {
     spawnDepth: agent.spawnDepth,
     currentTool: agent.currentTool,
     status,
-    signal: signalFor(agent, messaged),
+    signal,
   };
 }
 
@@ -234,6 +234,11 @@ export function diffSubagents(previous, snapshot, messaged) {
     const settled = a.resolved || prior?.settled === true;
     const status = settled || a.silent ? 'done' : 'active';
     const toolKey = toolKeyOf(a);
+    // A message is news in its own right. Without this it rode along on an
+    // event that only fires when the status or the current tool changes, so a
+    // message reaching an agent that stayed on the same tool produced nothing
+    // at all - which is every message to an agent waiting on a long call.
+    const signal = signalFor(a, messaged);
     // Once an agent is done its own file writes nothing further - comparing
     // toolKey there would only ever compare against itself.
     // A first sighting that is already done is not news: no client has
@@ -241,9 +246,10 @@ export function diffSubagents(previous, snapshot, messaged) {
     // restart reads a session's finished subagents back in, and on a long
     // session that is dozens of them.
     const firstSightDone = !prior && status === 'done';
-    const changed = !firstSightDone && (!prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey));
+    const changed = !firstSightDone
+      && (signal !== null || !prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey));
     next.set(a.agentId, { status, settled, toolKey });
-    if (changed) events.push(eventFor(a, status, messaged));
+    if (changed) events.push(eventFor(a, status, signal));
   }
   return { events, next };
 }

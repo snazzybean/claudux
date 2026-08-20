@@ -1,15 +1,15 @@
 // public/js/agentLines.js
 //
-// The glowing connections between a session's row and its open agent
-// windows, and the pulses that run along them. Owns the svg overlay and
-// nothing else: it is handed anchor and target points and draws, so the
-// window module does not have to know about paths, filters or SVG at all.
+// The glowing connections between a session's row and its open agent windows,
+// and the pulses that run along them. Owns the svg overlay and nothing else:
+// it is handed routes and draws them, so the window module never touches a
+// path, a filter or an animation.
 //
-// The glow is a filter rather than `filter: drop-shadow`: a drop shadow is
-// one offset copy and reads as a thin line with a haze, while a blurred copy
-// of the stroke merged under the sharp one is what reads as light.
+// The glow is an SVG filter rather than `filter: drop-shadow`: a drop shadow
+// is one offset copy and reads as a thin line with a haze, while a blurred
+// copy of the stroke merged under the sharp one reads as light.
 const GLOW_FILTER_ID = 'agentLineGlow';
-const PULSE_DURATION_MS = 900;
+const PULSE_DURATION_MS = 1100;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -26,9 +26,9 @@ function glowDefs() {
     // Wide enough that the blur is not cut off at the path's own box.
     x: '-50%', y: '-50%', width: '200%', height: '200%',
   });
-  // The blur twice under the sharp stroke: one copy is a haze, two is a
-  // glow. Held as a reference rather than looked up again - a type selector
-  // for a camelCase SVG tag is a trap in an HTML document.
+  // The blur twice under the sharp stroke: one copy is a haze, two is a glow.
+  // Held as a reference rather than looked up again - a type selector for a
+  // camelCase SVG tag is a trap in an HTML document.
   const merge = element('feMerge', {});
   merge.append(
     element('feMergeNode', { in: 'haze' }),
@@ -40,75 +40,66 @@ function glowDefs() {
   return defs;
 }
 
-// The trunk is one straight line out of the session's row; a stub is a
-// branch off it that turns into the window's near edge. Horizontal out of the
-// trunk and vertical into the window, so it reads as a cable coming off a
-// tray rather than as a diagonal pointing at something.
-//
-// Which points those are is agentLayout.js's decision - this only draws.
-function trunkPath({ from, to }) {
-  return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
-}
-
-function stubPath({ branch, entry, above }) {
-  const rise = above ? -1 : 1;
-  const reach = Math.max(24, Math.abs(entry.y - branch.y) / 2);
-  return `M ${branch.x} ${branch.y}`
-    + ` C ${branch.x + reach} ${branch.y}, ${entry.x} ${entry.y - rise * reach}, ${entry.x} ${entry.y}`;
-}
-
-// What a pulse travels: out along the trunk to this window's branch, then up
-// or down its stub. One path, so the dot never jumps between two.
-function pulsePath(trunk, stub) {
-  return `M ${trunk.from.x} ${trunk.from.y} L ${stub.branch.x} ${stub.branch.y}`
-    + stubPath(stub).slice(stubPath(stub).indexOf(' C'));
+// Out of the row into this line's own lane, along the lane, then a quarter
+// turn into the window's edge. Horizontal where it leaves and vertical where
+// it arrives, so it reads as a cable rather than as a diagonal pointing at
+// something.
+function pathFor({ entry, lane }) {
+  return `M ${lane.fromX} ${lane.fromY}`
+    + ` C ${lane.fromX + 40} ${lane.fromY}, ${lane.entryX - 24} ${lane.y}, ${lane.entryX} ${lane.y}`
+    + ` L ${lane.turnX} ${lane.y}`
+    + ` C ${entry.x} ${lane.y}, ${entry.x} ${lane.y}, ${entry.x} ${entry.y}`;
 }
 
 export function initAgentLines(svgEl) {
   svgEl.appendChild(glowDefs());
-  // Its own group, so replaceChildren on it never takes the defs with it.
+  // Its own group, so replacing the lines never takes the defs with it.
   const group = element('g', { filter: `url(#${GLOW_FILTER_ID})` });
   svgEl.appendChild(group);
 
-  // agentId -> the path currently drawn for it, so a pulse can follow the
-  // same curve without looking it up in the DOM.
+  // agentId -> the path drawn for it, so a pulse can follow the same curve
+  // without looking it up in the DOM.
   const paths = new Map();
 
-  // The trunk plus one stub per open window. A pulse gets the whole way from
-  // the row to its window, which is neither of the drawn paths - hence the
-  // third one, kept but not rendered.
-  function draw({ trunk, stubs }) {
+  // Everything at once, every time. Drawing per session was a bug twice over:
+  // the second session's draw wiped the first one's lines, and with nothing
+  // open the loop body never ran, so the last lines stayed on screen after
+  // their windows were gone.
+  function draw(routes) {
     group.replaceChildren();
     paths.clear();
-    if (!trunk || stubs.length === 0) return;
-    group.appendChild(element('path', { d: trunkPath(trunk), class: 'agent-line agent-trunk' }));
-    for (const stub of stubs) {
-      group.appendChild(element('path', { d: stubPath(stub), class: 'agent-line' }));
-      paths.set(stub.agentId, pulsePath(trunk, stub));
+    for (const route of routes) {
+      const d = pathFor(route);
+      group.appendChild(element('path', { d, class: 'agent-line' }));
+      paths.set(route.agentId, d);
     }
   }
 
-  // A pulse stands for one message, and it travels the way the message did:
-  // out from the row for something the session sent the agent, back along the
-  // same path for something the agent sent the session. The line's own flow
-  // says "something hangs here"; a pulse says "this just went past".
+  // A pulse stands for one message and travels the way the message did: out
+  // from the row for something the session sent, back along the same path for
+  // something the agent sent. The line's own flow says "something hangs
+  // here"; a pulse says "this just went past".
+  //
+  // CSS motion path rather than SMIL's animateMotion: SMIL runs on the main
+  // thread and stutters whenever anything else is busy, which for a terminal
+  // streaming output is most of the time.
   function pulse(agentId, direction = 'toAgent') {
     const d = paths.get(agentId);
     if (!d) return;
-    const dot = element('circle', { r: 4, class: `agent-pulse agent-pulse-${direction}` });
-    const motion = element('animateMotion', {
-      dur: `${PULSE_DURATION_MS / 1000}s`,
-      path: d,
-      fill: 'freeze',
-      // Same path either way; a message from the agent simply runs it
-      // backwards, which is also what makes the two read as one channel.
-      keyPoints: direction === 'toLead' ? '1;0' : '0;1',
-      keyTimes: '0;1',
-      calcMode: 'linear',
-    });
-    dot.appendChild(motion);
+    const dot = element('circle', { r: 4, cx: 0, cy: 0, class: `agent-pulse agent-pulse-${direction}` });
+    dot.style.offsetPath = `path("${d}")`;
+    dot.style.offsetRotate = '0deg';
     group.appendChild(dot);
-    motion.addEventListener('endEvent', () => dot.remove());
+    const from = direction === 'toLead' ? '100%' : '0%';
+    const to = direction === 'toLead' ? '0%' : '100%';
+    const run = dot.animate(
+      [{ offsetDistance: from }, { offsetDistance: to }],
+      { duration: PULSE_DURATION_MS, easing: 'ease-in-out' },
+    );
+    run.addEventListener('finish', () => dot.remove());
+    // A pulse whose line is redrawn under it would otherwise sit there for
+    // good, since its finish event never fires once it is out of the tree.
+    run.addEventListener('cancel', () => dot.remove());
   }
 
   function clear() {
