@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { loadProjects } from '../lib/projectStore.js';
 import {
@@ -17,7 +18,10 @@ import {
   isUnwantedDeath,
 } from '../lib/tmuxManager.js';
 import { sanitizePaneText } from '../lib/paneText.js';
-import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch } from '../lib/sessionMeta.js';
+import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch, claudeSessionIdsForTmux } from '../lib/sessionMeta.js';
+import { chooseTranscript } from '../lib/contextUsage.js';
+import { subagentsDirFor, AGENT_ID_RE } from '../lib/subagentWatcher.js';
+import { readAgentBlocks } from '../lib/agentTranscript.js';
 import { getTokenById, getAccountById, listAccounts } from '../lib/accountStore.js';
 import { writeSessionTokenFile, removeSessionTokenFile } from '../lib/sessionTokenFile.js';
 import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
@@ -341,6 +345,37 @@ export function sessionsRouter(config) {
       }
       const raw = await capturePane(req.params.id);
       res.json({ raw, clean: sanitizePaneText(raw) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // One subagent's own conversation, for the window that shows it. `after`
+  // is the offset a previous answer returned, so a window that is already
+  // open fetches only what has been written since - a transcript that runs
+  // to tens of kilobytes is not re-sent on every tool call.
+  router.get('/sessions/:id/agents/:agentId', (req, res, next) => {
+    try {
+      const { id, agentId } = req.params;
+      // The id goes into a path.join below, so it is held to the same
+      // whitelist that matches an agent's meta file in subagentWatcher.js.
+      if (!AGENT_ID_RE.test(agentId)) {
+        res.status(400).json({ error: 'Unusable agent id' });
+        return;
+      }
+      if (!getMeta(config.dataDir, id)) {
+        res.status(404).json({ error: 'Unknown session' });
+        return;
+      }
+      const transcript = chooseTranscript(config.claudeHome, claudeSessionIdsForTmux(config.dataDir, id));
+      const dir = subagentsDirFor(transcript);
+      const agentPath = dir ? path.join(dir, `agent-${agentId}.jsonl`) : null;
+      if (!agentPath || !fs.existsSync(agentPath)) {
+        res.status(404).json({ error: 'Unknown agent' });
+        return;
+      }
+      const after = Number.parseInt(req.query.after ?? '0', 10);
+      res.json(readAgentBlocks(agentPath, Number.isFinite(after) && after > 0 ? after : 0));
     } catch (err) {
       next(err);
     }

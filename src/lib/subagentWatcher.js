@@ -106,7 +106,7 @@ export function agentAppearsDone(jsonlText) {
 // alphanumeric only - that skipped such an agent entirely. It stays a
 // whitelist all the same: the id goes straight into a path.join, and
 // neither a dot nor a separator gets in.
-const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
+export const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 
 // Where an agent's completion is recorded depends on who spawned it, so
