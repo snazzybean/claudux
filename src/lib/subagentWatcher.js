@@ -9,6 +9,7 @@
 // session's own status.
 import fs from 'node:fs';
 import path from 'node:path';
+import { chooseTranscript, readTranscriptTail } from './contextUsage.js';
 
 // A session's own transcript sits at <projectDir>/<sessionId>.jsonl; its
 // subagents live in the sibling directory <projectDir>/<sessionId>/subagents.
@@ -87,4 +88,60 @@ export function resolvedToolUseIds(transcriptText) {
     }
   }
   return ids;
+}
+
+const AGENT_META_RE = /^agent-([a-zA-Z0-9]+)\.meta\.json$/;
+
+// One snapshot of every subagent currently on disk for a session - no
+// history, no diffing. `sessionIds` are every id the tmux session may have
+// carried across a /clear (see contextUsage.chooseTranscript) - subagents
+// belong to whichever file is the CURRENT one.
+export function subagentSnapshot(claudeHome, sessionIds) {
+  const transcriptPath = chooseTranscript(claudeHome, sessionIds);
+  const dir = subagentsDirFor(transcriptPath);
+  if (!dir) return [];
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    // No subagents directory: a session that never spawned a Task, not an
+    // error.
+    return [];
+  }
+  let resolved;
+  try {
+    resolved = resolvedToolUseIds(readTranscriptTail(transcriptPath));
+  } catch {
+    resolved = new Set();
+  }
+
+  const agents = [];
+  for (const file of files) {
+    const match = AGENT_META_RE.exec(file);
+    if (!match) continue;
+    const agentId = match[1];
+    let meta;
+    try {
+      meta = parseAgentMeta(fs.readFileSync(path.join(dir, file), 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!meta) continue;
+    let currentTool = null;
+    try {
+      currentTool = currentToolFromAgentTranscript(readTranscriptTail(path.join(dir, `agent-${agentId}.jsonl`)));
+    } catch {
+      // The jsonl hasn't been written yet, or was read mid-write - the
+      // agent still shows up, just without a current tool.
+    }
+    agents.push({
+      agentId,
+      agentType: meta.agentType,
+      description: meta.description,
+      spawnDepth: meta.spawnDepth,
+      currentTool,
+      resolved: meta.toolUseId ? resolved.has(meta.toolUseId) : false,
+    });
+  }
+  return agents;
 }

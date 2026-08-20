@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds } from '../src/lib/subagentWatcher.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import { subagentsDirFor, parseAgentMeta, currentToolFromAgentTranscript, resolvedToolUseIds, subagentSnapshot } from '../src/lib/subagentWatcher.js';
 
 // Claude Code writes a session's own transcript at
 // <projectDir>/<sessionId>.jsonl and its subagents' transcripts at
@@ -84,4 +86,69 @@ test('resolvedToolUseIds collects tool_use_id from tool_result blocks', () => {
 test('resolvedToolUseIds ignores non-tool_result content and broken lines', () => {
   const jsonl = line({ type: 'user', message: { content: [{ type: 'text', text: 'hi' }] } }) + '{ broken\n';
   assert.deepEqual([...resolvedToolUseIds(jsonl)], []);
+});
+
+function writeAgent(dir, agentId, meta, transcriptLines) {
+  fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta));
+  fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), transcriptLines.map(line).join(''));
+}
+
+test('subagentSnapshot reads every agent in the subagents directory', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+
+  writeAgent(subagentsDir, 'aaa111', { agentType: 'general-purpose', description: 'Explore', toolUseId: 'toolu_1' },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Grep', input: { pattern: 'auth' } }] } }]);
+  writeAgent(subagentsDir, 'bbb222', { agentType: 'code-review', description: 'Review', toolUseId: 'toolu_2' },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'x.js' } }] } }]);
+
+  const snapshot = subagentSnapshot(claudeHome, ['sess-1']).sort((a, b) => a.agentId.localeCompare(b.agentId));
+
+  assert.deepEqual(snapshot, [
+    {
+      agentId: 'aaa111', agentType: 'general-purpose', description: 'Explore', spawnDepth: 1,
+      currentTool: { name: 'Grep', input: { pattern: 'auth' } }, resolved: false,
+    },
+    {
+      agentId: 'bbb222', agentType: 'code-review', description: 'Review', spawnDepth: 1,
+      currentTool: { name: 'Read', input: { file_path: 'x.js' } }, resolved: false,
+    },
+  ]);
+});
+
+test('subagentSnapshot marks an agent resolved once the parent transcript carries its tool_result', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'),
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] } }));
+  writeAgent(subagentsDir, 'aaa111', { agentType: 'general-purpose', toolUseId: 'toolu_1' }, []);
+
+  const [agent] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agent.resolved, true);
+});
+
+test('subagentSnapshot returns an empty list without a subagents directory', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  assert.deepEqual(subagentSnapshot(claudeHome, ['sess-1']), []);
+});
+
+test('subagentSnapshot skips a meta.json without a matching jsonl instead of throwing', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  // meta.json written first, jsonl not yet - the two files don't land atomically.
+  fs.writeFileSync(path.join(subagentsDir, 'agent-ccc333.meta.json'), JSON.stringify({ agentType: 'general-purpose' }));
+
+  const [agent] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agent.currentTool, null);
 });
