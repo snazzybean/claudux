@@ -37,3 +37,54 @@ export function parseAgentMeta(rawJson) {
     spawnDepth: Number.isFinite(raw.spawnDepth) ? raw.spawnDepth : 1,
   };
 }
+
+// What an agent (main session or subagent) is doing RIGHT NOW: the last
+// tool_use block of its own transcript. Same skip-broken-lines handling as
+// contextFromTranscript - these files can be read mid-write.
+export function currentToolFromAgentTranscript(jsonlText) {
+  let tool = null;
+  for (const rawLine of String(jsonlText ?? '').split('\n')) {
+    if (!rawLine.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+    if (entry?.type !== 'assistant') continue;
+    const content = entry.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block?.type === 'tool_use' && typeof block.name === 'string') {
+        tool = { name: block.name, input: block.input ?? null };
+      }
+    }
+  }
+  return tool;
+}
+
+// A subagent's own transcript carries no completion marker - the only
+// reliable "it's done" signal is the PARENT session recording a tool_result
+// for the Task call's toolUseId. Collected from every user-role line, not
+// just the last one: several subagents can resolve within the same tick.
+export function resolvedToolUseIds(transcriptText) {
+  const ids = new Set();
+  for (const rawLine of String(transcriptText ?? '').split('\n')) {
+    if (!rawLine.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+    if (entry?.type !== 'user') continue;
+    const content = entry.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+        ids.add(block.tool_use_id);
+      }
+    }
+  }
+  return ids;
+}
