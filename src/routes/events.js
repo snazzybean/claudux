@@ -1,6 +1,6 @@
-// Status deltas as Server-Sent Events. One direction only, so no second
-// WebSocket next to ttyd's: EventSource brings reconnect, backoff and
-// heartbeat along instead of hand-writing all three.
+// Status and subagent deltas as Server-Sent Events, on one connection. One
+// direction only, so no second WebSocket next to ttyd's: EventSource brings
+// reconnect, backoff and heartbeat along instead of hand-writing all three.
 //
 // The stream carries deltas ONLY - never "reload the list". The expensive
 // parts of the session list stay on their 15s tick.
@@ -33,8 +33,8 @@ export function eventsRouter() {
   }, 60_000);
   heartbeat.unref?.();
 
-  function publish(event) {
-    const payload = `event: status\ndata: ${JSON.stringify(event)}\n\n`;
+  function publish(event, type = 'status') {
+    const payload = `event: ${type}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const res of clients) res.write(payload);
   }
 
