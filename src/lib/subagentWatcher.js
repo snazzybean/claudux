@@ -113,16 +113,16 @@ const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 // three cases rather than one session-wide lookup. `ownTranscript` is the
 // text subagentSnapshot already read for currentTool - null when that read
 // failed, which agentAppearsDone reads as "not done".
-// Nothing written for this long and the agent is absent rather than
-// thinking: it appends a line on every tool result, and the longest single
-// tool call measured here is minutes. This is the only signal for an agent
-// interrupted mid-turn - it never writes a closing message, and no id will
-// ever be recorded for it either, so without a floor its node orbits for
-// the life of the process.
-const SILENT_DONE_MS = 30 * 60 * 1000;
+// Nothing written for this long and the agent is treated as gone. It is
+// the only signal an interrupted agent leaves - it writes no closing
+// message and no id is ever recorded for it, so nothing on disk tells it
+// apart from one waiting on a slow tool call. Which is why it is reported
+// separately from `resolved` and is not sticky: a genuinely slow agent
+// comes back on its next line, and ten minutes is short enough that an
+// abandoned one is not still circling long after the fact.
+const SILENT_DONE_MS = 10 * 60 * 1000;
 
-function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker, silentForMs) {
-  if (silentForMs >= SILENT_DONE_MS) return true;
+function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker) {
   // A slash command spawns an agent without a Task call, so there is no id
   // to look for anywhere - its own transcript is the only evidence there is.
   if (!meta.toolUseId) return agentAppearsDone(ownTranscript);
@@ -199,7 +199,8 @@ export function subagentSnapshot(claudeHome, sessionIds, tracker = createResolve
       description: meta.description,
       spawnDepth: meta.spawnDepth,
       currentTool: currentToolFromAgentTranscript(ownTranscript),
-      resolved: agentIsResolved(dir, meta, resolved, ownTranscript, tracker, silentForMs),
+      resolved: agentIsResolved(dir, meta, resolved, ownTranscript, tracker),
+      silent: silentForMs >= SILENT_DONE_MS,
     });
   }
   return agents;
@@ -231,10 +232,14 @@ export function diffSubagents(previous, snapshot) {
   const events = [];
   for (const a of snapshot) {
     const prior = previousMap.get(a.agentId);
-    // Sticky once done: nothing can legitimately un-resolve an agent, since
-    // its own file writes nothing more once it's finished. Kept as a floor
-    // under the resolution in resolvedIds.js rather than as its fallback.
-    const status = a.resolved || prior?.status === 'done' ? 'done' : 'active';
+    // Sticky once resolved: nothing can legitimately un-resolve an agent,
+    // since its own file writes nothing more once it's finished. Kept as a
+    // floor under the resolution in resolvedIds.js rather than as its
+    // fallback. Silence is deliberately outside that memory - it is a guess
+    // about an agent that may still be working, and a slow one has to be
+    // able to come back rather than stay pinned as finished.
+    const settled = a.resolved || prior?.settled === true;
+    const status = settled || a.silent ? 'done' : 'active';
     const toolKey = toolKeyOf(a);
     // Once an agent is done its own file writes nothing further - comparing
     // toolKey there would only ever compare against itself.
@@ -244,7 +249,7 @@ export function diffSubagents(previous, snapshot) {
     // session that is dozens of them.
     const firstSightDone = !prior && status === 'done';
     const changed = !firstSightDone && (!prior || prior.status !== status || (status === 'active' && prior.toolKey !== toolKey));
-    next.set(a.agentId, { status, toolKey });
+    next.set(a.agentId, { status, settled, toolKey });
     if (changed) events.push(eventFor(a, status));
   }
   return { events, next };

@@ -127,11 +127,11 @@ test('subagentSnapshot reads every agent in the subagents directory', () => {
   assert.deepEqual(snapshot, [
     {
       agentId: 'aaa111', agentType: 'general-purpose', description: 'Explore', spawnDepth: 1,
-      currentTool: { name: 'Grep', input: { pattern: 'auth' } }, resolved: false,
+      currentTool: { name: 'Grep', input: { pattern: 'auth' } }, resolved: false, silent: false,
     },
     {
       agentId: 'bbb222', agentType: 'code-review', description: 'Review', spawnDepth: 1,
-      currentTool: { name: 'Read', input: { file_path: 'x.js' } }, resolved: false,
+      currentTool: { name: 'Read', input: { file_path: 'x.js' } }, resolved: false, silent: false,
     },
   ]);
 });
@@ -616,7 +616,7 @@ test('subagentSnapshot keeps an id-less agent active while it narrates between t
 // marker will ever appear - and without a floor its node orbits for the
 // life of the process. A running agent appends on every tool result, so
 // silence on this scale is absence, not thought.
-test('subagentSnapshot counts an agent whose transcript went silent long ago as finished', () => {
+test('subagentSnapshot reports a long-silent agent as silent, not as resolved', () => {
   const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
   const projectDir = path.join(claudeHome, 'projects', '-srv-project');
   const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
@@ -629,5 +629,29 @@ test('subagentSnapshot counts an agent whose transcript went silent long ago as 
   fs.utimesSync(agentPath, longAgo, longAgo);
 
   const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
-  assert.equal(agentRow.resolved, true);
+  assert.equal(agentRow.silent, true);
+  // Silence is a guess, and the two are kept apart so the guess can be
+  // taken back - see diffSubagents.
+  assert.equal(agentRow.resolved, false);
+});
+
+// Silence says an agent is gone, and it is right about an aborted one -
+// but a slow tool call looks the same, and there the guess has to be
+// taken back. Sticky 'done' is for the signals that cannot be wrong.
+test('diffSubagents lets an agent come back after silence turned out to be a slow tool call', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const silent = diffSubagents(first.next, [agent({ silent: true })]);
+  assert.equal(silent.events[0].status, 'done');
+
+  const back = diffSubagents(silent.next, [agent({ currentTool: { name: 'Bash', input: {} } })]);
+  assert.equal(back.events.length, 1);
+  assert.equal(back.events[0].status, 'active');
+});
+
+test('diffSubagents keeps a resolved agent done even if it writes again', () => {
+  const first = diffSubagents(undefined, [agent()]);
+  const done = diffSubagents(first.next, [agent({ resolved: true })]);
+  assert.equal(done.events[0].status, 'done');
+  const later = diffSubagents(done.next, [agent({ currentTool: { name: 'Bash', input: {} } })]);
+  assert.deepEqual(later.events, []);
 });
