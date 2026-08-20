@@ -539,3 +539,42 @@ test('subagentSnapshot resolves a nested agent whose tool_result is far from the
   const byId = new Map(subagentSnapshot(claudeHome, ['sess-1']).map((a) => [a.agentId, a]));
   assert.equal(byId.get('child1').resolved, true);
 });
+
+// An agent spawned under a name gets its name folded into its id, so the
+// id carries a hyphen: agent-aExportSweep-acebce40dd0e83d3. A character
+// class of [a-zA-Z0-9] silently skips the whole agent - the id is what
+// finds its meta and its transcript, so no id means no agent at all.
+test('subagentSnapshot reads an agent whose id carries a name and a hyphen', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  // Verbatim from a real meta.json written on this host: a named agent
+  // carries no toolUseId, and its agentType is the name it was given.
+  writeAgent(subagentsDir, 'aExportSweep-acebce40dd0e83d3', { agentType: 'ExportSweep', description: 'Count exports', spawnDepth: 0 },
+    [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'x.js' } }] } }]);
+
+  const [agentRow] = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.equal(agentRow.agentId, 'aExportSweep-acebce40dd0e83d3');
+  assert.equal(agentRow.resolved, false);
+});
+
+// The id reaches path.join(), so widening the class is only safe as long
+// as it still cannot walk out of the directory - and parentAgentId, which
+// reaches the same call, has to be held to it too.
+test('subagentSnapshot skips an agent id that could leave the subagents directory', () => {
+  const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-sa-'));
+  const projectDir = path.join(claudeHome, 'projects', '-srv-project');
+  const subagentsDir = path.join(projectDir, 'sess-1', 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'sess-1.jsonl'), '');
+  fs.writeFileSync(path.join(subagentsDir, 'agent-..%2fescape.meta.json'), JSON.stringify({ agentType: 'general-purpose' }));
+  writeAgent(subagentsDir, 'aaa111', { agentType: 'general-purpose', toolUseId: 'toolu_1', parentAgentId: '../../escape', spawnDepth: 2 }, []);
+
+  const snapshot = subagentSnapshot(claudeHome, ['sess-1']);
+  assert.deepEqual(snapshot.map((a) => a.agentId), ['aaa111']);
+  // An unusable parent id resolves to nothing rather than reading a path
+  // of its choosing.
+  assert.equal(snapshot[0].resolved, false);
+});

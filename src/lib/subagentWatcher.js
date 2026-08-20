@@ -95,7 +95,13 @@ export function agentAppearsDone(jsonlText) {
   return !content.some((block) => block?.type === 'tool_use');
 }
 
-const AGENT_META_RE = /^agent-([a-zA-Z0-9]+)\.meta\.json$/;
+// An agent spawned under a name carries that name in its id, hyphen
+// included (agent-aExportSweep-acebce40dd0e83d3), so the class cannot be
+// alphanumeric only - that skipped such an agent entirely. It stays a
+// whitelist all the same: the id goes straight into a path.join, and
+// neither a dot nor a separator gets in.
+const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
+const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 
 // Where an agent's completion is recorded depends on who spawned it, so
 // three cases rather than one session-wide lookup. `ownTranscript` is the
@@ -109,6 +115,9 @@ function agentIsResolved(dir, meta, sessionResolved, ownTranscript, tracker) {
   // spawned it, never in the session's own - measured: 0 of 8 nested agents
   // were resolvable from the session file, all 8 from their parent's.
   if (meta.parentAgentId) {
+    // Held to the same whitelist as an agent's own id: it reaches the same
+    // path.join, and only the id in the FILE NAME was ever checked.
+    if (!AGENT_ID_RE.test(meta.parentAgentId)) return false;
     try {
       const parentPath = path.join(dir, `agent-${meta.parentAgentId}.jsonl`);
       return tracker.idsFor(parentPath).has(meta.toolUseId);
