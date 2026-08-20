@@ -96,14 +96,14 @@ for (const [w, h] of [[1999, 1491], [1328, 800], [1224, 1731], [1600, 900], [256
     // screen. Absolute heights alone missed a 142° corner that showed up the
     // first time the real page was measured: it needs the row to sit a little
     // under a hundred pixels from the trunk, and no round number did that.
-    const { trunkY } = routesFor(boxes, { x: 320, y: h / 2 })[0];
+    const { trunkY } = routesFor(boxes, { x: 320, y: h / 2 }, viewport)[0];
     const heights = new Set([40, h - 40, Math.round(h / 2)]);
     for (const delta of [-160, -86, -60, -24, -6, 0, 6, 24, 60, 86, 160]) {
       heights.add(Math.max(40, Math.min(h - 40, Math.round(trunkY + delta))));
     }
     for (const ay of heights) {
       const anchor = { x: 320, y: ay };
-      const routes = routesFor(boxes, anchor);
+      const routes = routesFor(boxes, anchor, viewport);
       const paths = routes.map((route) => samplePath(route.path, 40));
       cases += 1;
       let bad = 0;

@@ -203,9 +203,11 @@ function rowsOf(boxes) {
 
 // The trunk runs between two rows of windows, never above or below the whole
 // set: from below everything, a line to the top row would have to cross the
-// bottom one. With a single row there is nothing to sit between, and it goes
-// underneath - the row starts at the top of the screen, so above it there is
-// no room.
+// bottom one. With a single row there is nothing to sit between, so it goes
+// underneath - or above, if a window has been dragged so low that there is no
+// screen left beneath it. Without that second case the trunk left the bottom
+// edge entirely: a window pulled to the very bottom put it 24px past it,
+// along with the stub hanging off it.
 //
 // Read from the boxes as they are rather than from the layout, so a window
 // dragged somewhere takes the trunk into account. Beyond two rows - which
@@ -213,8 +215,13 @@ function rowsOf(boxes) {
 // window on the far side of another row does get a stub across it. One trunk
 // cannot do better than that, and the alternative jumps around under the
 // cursor while dragging.
-function trunkHeight(rows, anchor) {
-  if (rows.length < 2) return rows[0].bottom + TRUNK_GAP / 2;
+function trunkHeight(rows, anchor, viewport) {
+  if (rows.length < 2) {
+    const below = rows[0].bottom + TRUNK_GAP / 2;
+    if (below <= viewport.height - GAP) return below;
+    const above = rows[0].y - TRUNK_GAP / 2;
+    return above >= GAP ? above : clamp(below, GAP, viewport.height - GAP);
+  }
   let best = null;
   for (let i = 1; i < rows.length; i += 1) {
     const y = (rows[i - 1].bottom + rows[i].y) / 2;
@@ -231,21 +238,21 @@ function entryFor(box, trunkY) {
   const x = clamp(box.x + box.width * ENTRY_FRACTION, box.x + ENTRY_MARGIN, box.x + box.width - ENTRY_MARGIN);
   if (box.y >= trunkY) return { x: x + COLUMN_STAGGER, y: box.y, side: 'top' };
   if (box.y + box.height <= trunkY) return { x, y: box.y + box.height, side: 'bottom' };
-  return {
-    x: box.x,
-    y: clamp(trunkY, box.y + ENTRY_MARGIN, box.y + box.height - ENTRY_MARGIN),
-    side: 'left',
-  };
+  // The trunk runs across this window, so it is met on the leading edge at
+  // the trunk's own height: straight in, with nothing to turn. Holding the
+  // point away from the corners instead would put a bare right angle here,
+  // in the one shape whose whole point is not having any.
+  return { x: box.x, y: trunkY, side: 'left' };
 }
 
 // A route is a start point and a list of segments, each either a straight
 // `{ to }` or a cubic `{ c1, c2, to }`. agentLines.js turns them into a path
 // string and does nothing else with them; samplePath below walks the same
 // segments, which is how the probe measures the drawn line.
-export function routesFor(boxes, anchor) {
+export function routesFor(boxes, anchor, viewport) {
   if (boxes.length === 0) return [];
   const rows = rowsOf(boxes);
-  const trunkY = trunkHeight(rows, anchor);
+  const trunkY = trunkHeight(rows, anchor, viewport);
   const leftMost = Math.min(...boxes.map((box) => box.x));
   // The vertical run, just clear of the windows: as far right as the corridor
   // allows, because the bend into it can be no wider than half the distance
@@ -274,9 +281,7 @@ export function routesFor(boxes, anchor) {
       : Math.max(trunkStart, entry.x - stubWidth);
     const segments = trunkApproach(anchor, corridorX, trunkY, branchX);
 
-    if (entry.side === 'left') {
-      if (Math.abs(entry.y - trunkY) > 0.5) segments.push({ to: { x: entry.x, y: entry.y } });
-    } else {
+    if (entry.side !== 'left') {
       // Horizontal off the trunk, vertical into the edge. Both control points
       // sit inside the rectangle between branch and entry, so the curve does
       // too - which is what keeps a stub inside its own window's width.

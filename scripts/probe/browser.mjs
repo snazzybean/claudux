@@ -161,41 +161,53 @@ if (TRANSCRIPT) {
   if (back.length) console.log(`   von (${back[0]}) nach (${back[back.length - 1]})`);
 }
 
-// Dragging: the line has to follow, and a window pulled across the row has to
-// be met on its other edge.
-{
-  const bar = page.locator('.agent-window-bar').first();
-  const before = await page.evaluate(() => {
-    const p = document.querySelector('.agent-line');
-    const q = p.getPointAtLength(p.getTotalLength());
-    return [Math.round(q.x), Math.round(q.y)];
-  });
+// Dragging: the line has to follow, the window has to be met on whichever
+// edge now faces the trunk, and none of it may leave the screen. Both
+// directions, because they are different shapes: up moves a window across the
+// trunk, down can push the trunk itself off the bottom edge - which it did,
+// by 24px, until the trunk learned to go above a row instead.
+for (const [label, dx, dy, nth] of [['nach oben', 460, -300, 0], ['nach unten', 200, 900, 1]]) {
+  const bars = await page.locator('.agent-window-bar').count();
+  if (nth >= bars) continue;
+  const bar = page.locator('.agent-window-bar').nth(nth);
   const box = await bar.boundingBox();
   await page.mouse.move(box.x + 60, box.y + 10);
   await page.mouse.down();
-  await page.mouse.move(box.x + 460, box.y - 300, { steps: 12 });
+  await page.mouse.move(box.x + 60 + dx, box.y + 10 + dy, { steps: 12 });
   await page.mouse.up();
   await page.waitForTimeout(500);
-  const after = await page.evaluate(() => {
-    const win = document.querySelector('.agent-window').getBoundingClientRect();
+  const after = await page.evaluate((which) => {
+    const el = [...document.querySelectorAll('.agent-window')][which];
+    const r = el.getBoundingClientRect();
+    const win = [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
+    let lowest = 0;
+    let highest = 1e9;
     const ends = [...document.querySelectorAll('.agent-line')].map((p) => {
-      const q = p.getPointAtLength(p.getTotalLength());
+      const len = p.getTotalLength();
+      for (let i = 0; i <= 60; i += 1) {
+        const q = p.getPointAtLength((len * i) / 60);
+        lowest = Math.max(lowest, q.y);
+        highest = Math.min(highest, q.y);
+      }
+      const q = p.getPointAtLength(len);
       return [Math.round(q.x), Math.round(q.y)];
     });
-    return { win: [Math.round(win.x), Math.round(win.y), Math.round(win.width), Math.round(win.height)], ends };
-  });
+    return { win, ends, lowest: Math.round(lowest), highest: Math.round(highest) };
+  }, nth);
+  const [wx, wy, ww, wh] = after.win;
   // On an edge, wherever along it: the entry point is a fraction of the
   // window's own width and slides with it, so a test that expects it a fixed
   // distance from a corner tests last month's layout.
-  const [wx, wy, ww, wh] = after.win;
   const onEdge = after.ends.some(([x, y]) => {
     const alongX = x >= wx - 3 && x <= wx + ww + 3;
     const alongY = y >= wy - 3 && y <= wy + wh + 3;
     return (alongX && (Math.abs(y - wy) < 3 || Math.abs(y - (wy + wh)) < 3))
       || (alongY && (Math.abs(x - wx) < 3 || Math.abs(x - (wx + ww)) < 3));
   });
-  console.log(`Ziehen: Ende vorher (${before}), Fenster jetzt bei (${after.win[0]},${after.win[1]}), Linie sitzt an einer Kante: ${onEdge ? 'ja' : 'NEIN'}`);
-  await page.screenshot({ path: `${OUT}-dragged.png` });
+  const onScreen = after.lowest <= H && after.highest >= 0;
+  console.log(`Ziehen ${label}: Fenster bei (${wx},${wy}), Linie an einer Kante: ${onEdge ? 'ja' : 'NEIN'}`
+    + `, Linien im Bild: ${onScreen ? 'ja' : `NEIN (${after.highest}..${after.lowest} von ${H})`}`);
+  await page.screenshot({ path: `${OUT}-dragged-${nth}.png` });
 }
 
 // Close them the way a person would: bring the window forward, then hit its
