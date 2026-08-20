@@ -134,7 +134,12 @@ export function initSubagents({
   function updateBadge(sessionId, sessionAgents) {
     const badge = sessionRowSelector(sessionId);
     if (!badge) return;
-    const count = [...sessionAgents.values()].filter((a) => a.status === 'active').length;
+    // The badge is for the sessions you cannot see - the open one has the
+    // orbit, and counting the same agents twice on one screen reads as two
+    // different things happening.
+    const count = sessionId === activeSessionId()
+      ? 0
+      : [...sessionAgents.values()].filter((a) => a.status === 'active').length;
     if (count === 0) {
       badge.hidden = true;
     } else {
@@ -176,6 +181,10 @@ export function initSubagents({
   function sessionOpened(sessionId) {
     closePopover();
     renderOrbit(known.get(sessionId) ?? new Map());
+    // Which row carries a badge just changed on both ends: the session
+    // opened loses its own, the one left behind gets it back. Neither is
+    // reported by the stream, so nothing else would re-apply them.
+    refreshBadges();
   }
 
   // No session is open any more. Its own name for it rather than
@@ -186,6 +195,8 @@ export function initSubagents({
   function close() {
     closePopover();
     renderOrbit(new Map());
+    // No session is open, so every session's badge is due again.
+    refreshBadges();
   }
 
   // render() in app.js rebuilds the whole session list, and every rebuilt
