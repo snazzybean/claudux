@@ -4032,6 +4032,24 @@ button { cursor: pointer; }
   text-decoration: line-through;
 }
 
+/* "N new" while the reader has left the end. A row of its own in the column
+   rather than a pill floating over the last turn: on the phone the
+   transcript is as wide as the screen, so a floating one would cover the
+   very line it announces. */
+.conversation-jump {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  /* The size Stop and Send carry, so the three controls of this panel are
+     one height. */
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+}
+/* Its own `display` beats the UA's `[hidden]` rule regardless of
+   specificity - the same trap the panel and the composer carry. */
+.conversation-jump[hidden] { display: none; }
+
 .conversation-composer {
   flex: 0 0 auto;
   display: flex;

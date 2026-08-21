@@ -44,7 +44,7 @@ import { initUsage } from './js/usage.js';
 import { initSubagents, startSubagentDebug } from './js/subagents.js';
 import { initAgentWindows } from './js/agentWindows.js';
 import { showFiles, leaveFiles } from './js/files.js';
-import { showConversation, leaveConversation } from './js/conversation.js';
+import { showConversation, leaveConversation, noteSessionStatus } from './js/conversation.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
 import { initClaudeCodeUpdate } from './js/claudeCodeUpdate.js';
@@ -382,6 +382,10 @@ const activeSessionIdForDebug = () => openSessionId(currentProject?.sessions ?? 
 const eventSource = startEventStream(
   ({ tmuxSession, sessionId, state }) => {
     applyActivityState(tmuxSession, sessionId, state);
+    // Handed over rather than read from the session list: applyActivityState
+    // collapses the four values onto working/waiting for the dot, and the
+    // conversation view needs the distinction that collapse throws away.
+    noteSessionStatus({ tmuxSession, sessionId, state });
   },
   (payload) => {
     subagents.handleEvent(payload);
