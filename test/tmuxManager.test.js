@@ -7,6 +7,7 @@ import { getUtf8LocaleEnv } from '../src/lib/locale.js';
 import {
   isValidSlug,
   buildNewSessionArgs,
+  buildHookSettings,
   parseSessionList,
   normalizeTmuxListOutput,
   spawnTmux,
@@ -813,4 +814,94 @@ test('attach.sh refuses a session it did not issue and keeps accepting login nam
   } finally {
     await killSession(foreign).catch(() => {});
   }
+});
+
+// The hook settings travel as a start option, so the secret has to travel
+// with them - but it must never reach claude's own argv. Its slot is
+// therefore always emitted, `-` standing for "this session has none": with a
+// conditional slot the wrapper would shift away claude's first option
+// instead, and swallowing --session-id leaves the session out of the sidebar
+// entirely.
+test('buildNewSessionArgs passes hook settings and always keeps the secret slot', () => {
+  const withHook = buildNewSessionArgs({
+    sessionId: '11111111-2222-3333-4444-555555555555',
+    projectPath: '/srv/example', tokenFilePath: '/tmp/t.token', resume: false,
+    hookSettingsPath: '/tmp/hooks.json', sessionSecret: 'sekret',
+  });
+  const afterToken = withHook.indexOf('/tmp/t.token') + 1;
+  // The element right behind the token file path, and only there - the
+  // wrapper reads it by position and moves it into the environment.
+  assert.equal(withHook[afterToken], 'sekret');
+  assert.equal(withHook.filter((a) => a === 'sekret').length, 1);
+  const at = withHook.indexOf('--settings');
+  assert.notEqual(at, -1);
+  assert.equal(withHook[at + 1], '/tmp/hooks.json');
+});
+
+test('buildNewSessionArgs marks the empty secret slot instead of dropping it', () => {
+  const plain = buildNewSessionArgs({
+    sessionId: '11111111-2222-3333-4444-555555555555',
+    projectPath: '/srv/example', tokenFilePath: '/tmp/t.token', resume: false,
+  });
+  const afterToken = plain.indexOf('/tmp/t.token') + 1;
+  assert.equal(plain[afterToken], '-');
+  assert.equal(plain.includes('--settings'), false);
+  // No option of claude's ever lands in that slot - that is the whole point
+  // of the sentinel.
+  assert.deepEqual(plain.slice(-2), ['--session-id', '11111111-2222-3333-4444-555555555555']);
+
+  const resumed = buildNewSessionArgs({
+    sessionId: '11111111-2222-3333-4444-555555555555',
+    projectPath: '/srv/example', tokenFilePath: '/tmp/t.token', resume: true,
+  });
+  assert.equal(resumed[resumed.indexOf('/tmp/t.token') + 1], '-');
+  assert.deepEqual(resumed.slice(-2), ['--resume', '11111111-2222-3333-4444-555555555555']);
+});
+
+test('buildHookSettings names the loopback route and the escalate hook', () => {
+  const settings = buildHookSettings(4055, '11111111-2222-3333-4444-555555555555');
+  const hook = settings.hooks.PermissionRequest[0].hooks[0];
+  assert.equal(hook.type, 'http');
+  assert.match(hook.url, /^http:\/\/127\.0\.0\.1:4055\/api\/permission\/11111111-/);
+  assert.deepEqual(hook.allowedEnvVars, ['CLAUDUX_SESSION_SECRET']);
+  assert.equal(hook.headers['x-claudux-session-secret'], '$CLAUDUX_SESSION_SECRET');
+});
+
+// The secret arrives as an argv element and has to leave argv before claude
+// runs - the same handoff as the token, and the reason the slot exists at
+// all.
+test('the session wrapper script moves the secret into the environment and keeps it out of claude argv', async () => {
+  const fsp = await import('node:fs/promises');
+  const os2 = await import('node:os');
+  const path2 = await import('node:path');
+  const url = await import('node:url');
+  const { spawn: spawn2 } = await import('node:child_process');
+
+  const scriptPath = url.fileURLToPath(new URL('../scripts/claude-session.sh', import.meta.url));
+  const dir = await fsp.mkdtemp(path2.join(os2.tmpdir(), 'claudux-secret-'));
+  // Fake `claude` in PATH: reports its own argv and what it inherited.
+  await fsp.writeFile(path2.join(dir, 'claude'), '#!/bin/sh\necho "ARGV=[$*]"\necho "SECRET=[${CLAUDUX_SESSION_SECRET:-}]"\n', { mode: 0o755 });
+
+  const run = async (extra) => {
+    const tokenFile = path2.join(dir, `tok-${extra.join('-') || 'none'}`);
+    await fsp.writeFile(tokenFile, 'unused', { mode: 0o600 });
+    return new Promise((resolve) => {
+      const proc = spawn2(scriptPath, [tokenFile, ...extra], {
+        env: { PATH: `${dir}:${process.env.PATH}`, HOME: os2.homedir() },
+      });
+      let out = '';
+      proc.stdout.on('data', (d) => (out += d));
+      proc.on('close', () => resolve(out));
+    });
+  };
+
+  const withSecret = await run(['sekret', '--session-id', 'abc']);
+  assert.match(withSecret, /SECRET=\[sekret\]/);
+  assert.match(withSecret, /ARGV=\[--session-id abc\]/);
+
+  // The sentinel means "no secret" and must not reach the environment as a
+  // literal `-` either.
+  const withoutSecret = await run(['-', '--resume', 'abc']);
+  assert.match(withoutSecret, /SECRET=\[\]/);
+  assert.match(withoutSecret, /ARGV=\[--resume abc\]/);
 });

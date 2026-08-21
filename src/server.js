@@ -24,6 +24,8 @@ import * as ttydManager from './lib/ttydManager.js';
 import { isAllowedUpgradeOrigin } from './lib/originGuard.js';
 import { createAccessGate, hasValidSession } from './lib/accessGate.js';
 import { accessPublicRouter, accessProtectedRouter } from './routes/access.js';
+import { permissionHookRouter, permissionViewRouter, createPermissionStore } from './routes/permission.js';
+import { getMeta } from './lib/sessionMeta.js';
 import { startReaperInterval } from './lib/reaper.js';
 import { startStatusWatcherInterval } from './lib/statusWatcher.js';
 import { startSubagentWatcherInterval } from './lib/subagentWatcher.js';
@@ -32,19 +34,41 @@ import { startClaudeCodeUpdateInterval } from './lib/claudeCodeUpdateRun.js';
 
 export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}) {
   const app = express();
-  // The files tab saves text files up to 1 MB and brings its own parser
-  // for that (see routes/files.js). If the global one ran ahead of it
-  // with its default of 100 kB, it would reject the body with 413 before
-  // the route ever saw it.
+  // The files tab saves text files up to 1 MB and the permission hook
+  // reports tool inputs of a similar size; both bring their own parser (see
+  // routes/files.js and routes/permission.js). If the global one ran ahead
+  // of them with its default of 100 kB, it would reject the body with 413
+  // before the route ever saw it.
   const jsonParser = express.json();
+  const ownParser = (p) => p.startsWith('/api/files') || p.startsWith('/api/permission');
   app.use((req, res, next) => (
-    req.path.startsWith('/api/files') ? next() : jsonParser(req, res, next)
+    ownParser(req.path) ? next() : jsonParser(req, res, next)
   ));
   // Setup and login have to work without a session, so they sit in front of
   // the gate. Everything that presupposes one sits behind it - a single
   // router here would offer the password change to anyone who can send a
   // request.
   app.use('/access', accessPublicRouter(config));
+  // The permission routers are split the same way and for the same kind of
+  // reason: the hook is called by the `claude` process, which has no session
+  // cookie, so a router behind the gate would answer 401 and the store would
+  // never fill - in production only, since the probe runs with the gate off.
+  // The POST authenticates itself with the per-session secret instead. The
+  // GET/DELETE the browser reads stay behind the gate, mounted with the
+  // other routers below.
+  const permissionStore = createPermissionStore({ dataDir: config.dataDir });
+  const permissionWiring = {
+    store: permissionStore,
+    // Either half alone leaves a hole: the meta entry is only written after
+    // the spawn, so a hook firing before that would be turned away, while a
+    // session Claudux never started (resumed straight from the JSONL
+    // history) has no prepared flag until it is resumed once.
+    knowsSession: (id) => permissionStore.isPrepared(id) || Boolean(getMeta(config.dataDir, id)),
+  };
+  // Handed out rather than imported, the same route as the ttyd upgrade
+  // handler below: the session routes take each session's secret from it.
+  app.locals.permissionStore = permissionStore;
+  app.use('/api', permissionHookRouter(config, permissionWiring));
   app.use(createAccessGate(config));
   app.use('/access', accessProtectedRouter(config));
 
@@ -119,6 +143,7 @@ export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}
   // routers attached after it.
   app.use('/api/projects', projectsRouter(config));
   app.use('/api', sessionsRouter(config));
+  app.use('/api', permissionViewRouter(config, permissionWiring));
   app.use('/api', usageRouter(config));
   app.use('/api/notify', notifyRouter(config));
   app.use('/api/notifications', notificationsRouter(config));

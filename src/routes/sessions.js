@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { loadProjects } from '../lib/projectStore.js';
 import {
   buildNewSessionArgs,
+  buildHookSettings,
   spawnTmux,
   isValidSlug,
   hasSession,
@@ -25,6 +26,30 @@ import { readAgentBlocks } from '../lib/agentTranscript.js';
 import { getTokenById, getAccountById, listAccounts } from '../lib/accountStore.js';
 import { writeSessionTokenFile, removeSessionTokenFile } from '../lib/sessionTokenFile.js';
 import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
+
+// One stable settings file per session, holding the PermissionRequest hook
+// (see buildHookSettings). 0600 in a 0700 directory, because `claude` reads
+// it as the service user and nobody else has business in it - it names the
+// route that accepts this session's dialogs.
+//
+// The secret is derived from the session id, so a restart of this service
+// leaves a running session's hook working (see createPermissionStore).
+// Registering the id is what lets the route accept a hook that fires before
+// the session's meta entry is written.
+function prepareHook(config, store, sessionId) {
+  store.prepare(sessionId);
+  const sessionSecret = store.secretFor(sessionId);
+  const hookSettingsPath = path.join(config.dataDir, 'hook-settings', `${sessionId}.json`);
+  const dir = path.dirname(hookSettingsPath);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700); // mkdirSync's mode does nothing to an existing directory
+  fs.writeFileSync(
+    hookSettingsPath,
+    JSON.stringify(buildHookSettings(config.port, sessionId)),
+    { mode: 0o600 },
+  );
+  return { sessionSecret, hookSettingsPath };
+}
 
 export function sessionsRouter(config) {
   const router = express.Router();
@@ -47,7 +72,11 @@ export function sessionsRouter(config) {
       // Before the pane starts, not after: `claude` reads onboarding state
       // at its own startup, right after this call.
       ensureOnboardingCompleted();
-      const args = buildNewSessionArgs({ sessionId, projectPath: project.path, tokenFilePath, resume: false });
+      const { sessionSecret, hookSettingsPath } = prepareHook(config, req.app.locals.permissionStore, sessionId);
+      const args = buildNewSessionArgs({
+        sessionId, projectPath: project.path, tokenFilePath, resume: false,
+        hookSettingsPath, sessionSecret,
+      });
       spawnTmux(args);
       // Only respond once the session actually exists - otherwise the
       // frontend sets the ttyd iframe src before `tmux new-session` is
@@ -222,7 +251,14 @@ export function sessionsRouter(config) {
       const tokenFilePath = writeSessionTokenFile(config.dataDir, sessionId, token);
       // Same placement and reasoning as the create route above.
       ensureOnboardingCompleted();
-      const args = buildNewSessionArgs({ sessionId, projectPath: project.path, tokenFilePath, resume: true });
+      // Only here, not in the three branches above that reuse a RUNNING
+      // session: those start no process, so there is nothing to hand a
+      // settings file to - and the process they reuse already has one.
+      const { sessionSecret, hookSettingsPath } = prepareHook(config, req.app.locals.permissionStore, sessionId);
+      const args = buildNewSessionArgs({
+        sessionId, projectPath: project.path, tokenFilePath, resume: true,
+        hookSettingsPath, sessionSecret,
+      });
       spawnTmux(args);
       const started = await waitForSession(sessionId);
       // Only on failure - otherwise a race with the wrapper, see the

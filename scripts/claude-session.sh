@@ -16,6 +16,24 @@ set -eu
 tokenfile="$1"
 shift
 
+# The per-session secret the PermissionRequest hook proves itself with. Same
+# reasoning as the token above: it arrives as an argv element and moves into
+# the environment, because /proc/<pid>/cmdline is world-readable while the
+# environment is not.
+#
+# The slot is always present, so it can never swallow one of claude's own
+# options; `-` means this session runs without hooks. The guard around it is
+# for callers that pass nothing but the token file - under `set -u` a bare
+# `$1` would abort, and `[ … ] && shift` as a statement would abort under
+# `set -e` on the false branch.
+if [ $# -gt 0 ]; then
+  if [ "$1" != "-" ]; then
+    CLAUDUX_SESSION_SECRET="$1"
+    export CLAUDUX_SESSION_SECRET
+  fi
+  shift
+fi
+
 # Backfill HOME if it's missing: the tmux server inherits the service
 # environment, and every session inherits that gap with it.
 # Claude Code copes with it, shell hooks abort on it under `set -u`. This
