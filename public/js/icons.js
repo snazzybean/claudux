@@ -27,6 +27,10 @@ export const ICONS = {
   // Window with a prompt instead of a monitor-on-a-stand: this means the
   // console, not the device.
   terminal: '<rect x="1.9" y="2.6" width="12.2" height="10.8" rx="1.5"/><path d="M4.7 6.6 7 8.9l-2.3 2.3"/><path d="M8.6 11.3h3"/>',
+  // Beside `terminal` because it labels the tab beside it. A speech bubble
+  // like `important` further down, but with lines of text instead of an
+  // exclamation mark: this one marks the conversation, not an alert.
+  chat: '<path d="M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v5.6a1 1 0 0 1-1 1H6.4L3.6 13.2v-2.6h-.1a1 1 0 0 1-1-1z"/><path d="M5.2 6.2h5.6"/><path d="M5.2 8.4h3.4"/>',
   warning: '<path d="M8 2.4 14.3 13.2H1.7z"/><path d="M8 6.6v3"/><path d="M8 11.2h.01"/>',
   // The three below label the markdown alerts in the Files tab (note, tip,
   // important); warning and forbidden above carry the other two.
@@ -64,4 +68,25 @@ export function svgNode(name, className = '') {
   const template = document.createElement('template');
   template.innerHTML = svg(name, className);
   return template.content.firstElementChild;
+}
+
+// The five GitHub alert types (see src/lib/fileRender.js) and their icons.
+// caution takes the crossed circle rather than a second triangle, so it reads
+// as more than a louder warning.
+const ALERT_ICONS = {
+  note: 'info',
+  tip: 'bulb',
+  important: 'important',
+  warning: 'warning',
+  caution: 'forbidden',
+};
+
+// The renderer names each alert's type and leaves the icon to this side,
+// since this module is the only icon source in the UI. The loop lives here
+// next to the map rather than in each view that renders markdown - two of
+// them do now.
+export function fillAlertIcons(root) {
+  for (const title of root.querySelectorAll('.markdown-alert-title[data-icon]')) {
+    title.prepend(svgNode(ALERT_ICONS[title.dataset.icon] ?? 'info', 'icon-symbol'));
+  }
 }

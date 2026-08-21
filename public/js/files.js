@@ -8,24 +8,13 @@
 // outside never reaches the importing module.
 import { filesPanelEl } from './dom.js';
 import { showToast, checkResponse } from './messages.js';
-import { svg, svgNode } from './icons.js';
+import { svg, fillAlertIcons } from './icons.js';
 import { buildRow, buildTree, formatSize } from './fileTree.js';
 import { makeResizable } from './resizer.js';
 
 // Last opened directory per project: switching tabs returns there, not to
 // the root.
 const lastDirectory = new Map();
-
-// The five GitHub alert types (see src/lib/fileRender.js) and their icons.
-// caution takes the crossed circle rather than a second triangle, so it reads
-// as more than a louder warning.
-const ALERT_ICONS = {
-  note: 'info',
-  tip: 'bulb',
-  important: 'important',
-  warning: 'warning',
-  caution: 'forbidden',
-};
 
 let project = null;
 // Directory and open file are two states side by side, not an
@@ -568,11 +557,7 @@ function buildFileContent() {
     // The HTML arrives filtered from fileRender.js: raw HTML from the file
     // has passed a whitelist there, script and event handlers are gone.
     box.innerHTML = view.html;
-    // The renderer names each alert's type and leaves the icon to this side,
-    // since js/icons.js is the only icon source in this UI.
-    for (const title of box.querySelectorAll('.markdown-alert-title[data-icon]')) {
-      title.prepend(svgNode(ALERT_ICONS[title.dataset.icon] ?? 'info', 'icon-symbol'));
-    }
+    fillAlertIcons(box);
     box.addEventListener('click', (e) => {
       const link = e.target.closest('a[data-file-path]');
       if (!link) return;

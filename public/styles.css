@@ -3907,16 +3907,192 @@ button { cursor: pointer; }
   border-radius: var(--r-md);
 }
 
+/* ---------- Conversation ----------
+   The session's transcript as a document, in the same place as the file view
+   and hidden the same way - the terminal iframe underneath stays loaded (see
+   app.js), because this view's input goes back out through it.
+
+   The keybar below stays visible on this tab, unlike on the files tab: it is
+   this view's keyboard, so the composer sits above it rather than in its
+   place. */
+.conversation-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  overflow: hidden;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  /* Room for the floating overlay bar above, the same calculation
+     .files-panel does: 8px is its spacing from the edge
+     (.panel-overlay { top: 8px }). */
+  padding: calc(var(--overlay-height) + 8px) 8px 8px;
+}
+/* The element's own `display: flex` otherwise beats the browser's default
+   `[hidden] { display: none }` - author CSS wins over the UA stylesheet
+   regardless of specificity (same idiom as .copy-text-panel above). */
+.conversation-panel[hidden] { display: none; }
+
+.conversation-stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+/* Whatever stands in place of the conversation: loading, empty, no session. */
+.conversation-notice {
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: var(--fs-body);
+}
+
+.conversation-event {
+  /* An unwrapped path or a long tool result is what tears the panel open
+     sideways on the phone - the same reason .file-name and
+     .agent-tool-detail carry this. */
+  min-width: 0;
+  border-radius: var(--r-md);
+  padding: 2px 10px;
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+/* Only the two sides of the conversation read as cards. Everything else -
+   thinking, tool calls, results, diffs - is apparatus and stays flat, so the
+   turns themselves stay findable while scrolling past it. Fill blended out
+   of the text color for the same reason .session-row does it: three layers
+   built from the surface tokens alone stay indistinguishable. */
+.conversation-user,
+.conversation-assistant {
+  padding: 2px 12px;
+  box-shadow: var(--glass-card);
+  background: var(--surface-2); /* fallback for browsers without color-mix */
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--text));
+}
+/* Which side spoke, without a label: the accent edge marks the entries that
+   came from here. */
+.conversation-user { border-left: 2px solid var(--accent); }
+/* The turn arrives as html from the same renderer the Files tab uses, so it
+   takes .markdown-body along with it - only the page-sized padding and the
+   trailing paragraph margin have no place inside a card. */
+.conversation-event .markdown-body { padding: 0; }
+.conversation-event .markdown-body > *:last-child { margin-bottom: 0; }
+
+/* The apparatus is folded away: a conversation of any length consists mostly
+   of tool calls, and their content gets opened deliberately rather than read
+   in passing. */
+.conversation-event summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  overflow-wrap: anywhere;
+}
+.conversation-pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+}
+/* One scroller per foldout, never one per part: a patch arrives as up to
+   twenty hunks, and a ceiling on each of them would put twenty
+   swipe-catching boxes in the middle of the scrolling stream. A ceiling
+   there is at all is because a foldout is opened deliberately and a capped
+   tool result still runs to 4000 characters (MAX_RESULT_CHARS).
+
+   Against --app-height instead of vh: while typing, the on-screen keyboard
+   squeezes the viewport, vh would stay stuck at the old value. */
+.conversation-foldout-body {
+  max-height: calc(var(--app-height, 100dvh) * 0.4);
+  overflow: auto;
+}
+/* Everything the view says about an entry rather than showing of it: a call
+   still running, a shortened diff, an attached image. */
+.conversation-note {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-meta);
+}
+.conversation-todo-list {
+  margin: 0;
+  padding-left: 1.4em;
+  font-size: var(--fs-ui);
+}
+.conversation-todo-list li[data-status="in_progress"] { color: var(--live); }
+.conversation-todo-list li[data-status="completed"] {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.conversation-composer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-lg);
+  align-items: flex-end;
+}
+/* Its own `display: flex` beats the UA's `[hidden]` rule, same as the panel
+   above - and this one is hidden whenever there is no session to answer. */
+.conversation-composer[hidden] { display: none; }
+.conversation-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  /* Against --app-height instead of vh, and here it decides the layout: the
+     field grows with what is typed, so with the keyboard up a vh ceiling
+     would keep claiming 40% of the FULL screen and leave nothing of the
+     conversation above it. */
+  max-height: calc(var(--app-height, 100dvh) * 0.4);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  /* Recessed rather than raised, same reasoning as .search-input. */
+  box-shadow: var(--glass-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+}
+.conversation-input::placeholder { color: var(--text-muted); }
+/* Calmer than the global focus ring, for the same reason .search-input
+   replaces it: an outline around a field this size reads as a halo. */
+.conversation-input:focus-visible { outline: none; border-color: var(--accent); }
+.conversation-actions {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+}
+/* Everything else comes from .btn-quiet; only the touch target is its own. */
+.conversation-attach {
+  width: 34px;
+  height: 34px;
+}
+.conversation-attach:hover { color: var(--text); }
+/* The size .btn-accent brings along, so Stop and Send end up the same
+   height. */
+.conversation-stop {
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+}
+
 /* iOS Safari zooms into a field whose text is smaller than 16px and stays
    zoomed after leaving it - the page then sits offset until it is scrolled
    back by hand. 16px is the threshold, not a design choice.
 
    Only on touch pointers, so the fields keep the size of the interface
-   around them on the desktop. The three selectors below set a size of their
-   own; without naming them here, their specificity would win. */
+   around them on the desktop. The named selectors below set a size of
+   their own; without listing them here, their specificity would win. */
 @media (pointer: coarse) {
   input, textarea, select,
   .notify-edit input,
   .access-form input,
+  .conversation-input,
   .file-textarea { font-size: 16px; }
 }

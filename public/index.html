@@ -164,6 +164,7 @@
                      would leave it nameless. -->
                 <button id="tabTerminal" data-active="true" title="Terminal" aria-label="Terminal"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="1.9" y="2.6" width="12.2" height="10.8" rx="1.5"/><path d="M4.7 6.6 7 8.9l-2.3 2.3"/><path d="M8.6 11.3h3"/></svg></button>
                 <button id="tabFiles" data-active="false" title="Files" aria-label="Files"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg></button>
+                <button id="tabConversation" data-active="false" title="Conversation" aria-label="Conversation"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v5.6a1 1 0 0 1-1 1H6.4L3.6 13.2v-2.6h-.1a1 1 0 0 1-1-1z"/><path d="M5.2 6.2h5.6"/><path d="M5.2 8.4h3.4"/></svg></button>
               </div>
               <span class="account-badge" id="accountBadge" role="button" tabindex="0" aria-expanded="false" aria-controls="usagePopover"></span>
               <div class="overlay-menu-wrap">
@@ -221,6 +222,27 @@
                longer an iframe: the view comes from our own server and
                should behave like the rest of the UI. -->
           <div class="files-panel" id="filesPanel" style="display:none"></div>
+          <!-- The session's conversation, read from its own transcript. A
+               second client on the same session, not a second driver: input
+               goes back out through the very iframe above, via term.paste and
+               sendKey. Same level as #filesPanel, so it sits in the flex flow
+               the tab switch already hides and shows. See
+               docs/superpowers/specs/2026-08-21-claudux-konversationsansicht-design.md. -->
+          <div class="conversation-panel" id="conversationPanel" hidden>
+            <div class="conversation-stream" id="conversationStream" role="log" aria-live="polite"></div>
+            <div class="conversation-jump" id="conversationJump" hidden></div>
+            <div class="conversation-dialog" id="conversationDialog" hidden></div>
+            <div class="conversation-queue" id="conversationQueue" hidden></div>
+            <form class="conversation-composer" id="conversationComposer">
+              <textarea class="conversation-input" id="conversationInput" rows="1"
+                        placeholder="Message the session…" aria-label="Message the session"></textarea>
+              <div class="conversation-actions">
+                <button type="button" class="btn-quiet conversation-attach" id="conversationAttach" aria-label="Attach an image" title="Attach an image"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="11" height="9" rx="1"/><circle cx="6" cy="6.5" r="1"/><path d="M3 11l3-3 2.5 2.5L11 8l2 2"/></svg></button>
+                <button type="button" class="btn-surface btn-lift conversation-stop" id="conversationStop" hidden>Stop</button>
+                <button type="submit" class="btn-accent conversation-send" id="conversationSend">Send</button>
+              </div>
+            </form>
+          </div>
           <!-- Text view for selecting. It covers the terminal instead of
                hiding it: a display change on the iframe costs xterm a
                reflow. Its own close button, not just the keybar's copy

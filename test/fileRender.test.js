@@ -289,6 +289,31 @@ test('renderMarkdown turns a relative href in raw HTML into a file-view target',
   assert.ok(!html.includes('href="neighbor.md"'));
 });
 
+// A raw-HTML anchor never reaches the link() renderer, so it used to keep an
+// absolute target without target/rel - and a tap on it navigated the whole
+// document, unloading the terminal iframe along with it.
+test('renderMarkdown opens an absolute raw-HTML link in a new tab', () => {
+  const html = renderMarkdown('<a href="https://example.com/page">click</a>', CONTEXT);
+
+  assert.ok(html.includes('target="_blank"'));
+  assert.ok(html.includes('rel="noopener noreferrer"'));
+});
+
+test('renderMarkdown opens a raw-HTML link to an absolute path in a new tab', () => {
+  const html = renderMarkdown('<a href="/api/files/raw">click</a>', CONTEXT);
+
+  assert.ok(html.includes('target="_blank"'));
+  assert.ok(html.includes('rel="noopener noreferrer"'));
+});
+
+// The one target that must NOT open a tab: it points into this very document.
+test('renderMarkdown leaves a raw-HTML fragment link in the page', () => {
+  const html = renderMarkdown('<a href="#section">click</a>', CONTEXT);
+
+  assert.ok(html.includes('href="#section"'));
+  assert.ok(!html.includes('target='));
+});
+
 test('renderMarkdown keeps a fragment link, which is what heading ids are for', () => {
   const html = renderMarkdown('## Security\n\nsee [Security](#security)\n', CONTEXT);
 

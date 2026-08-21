@@ -16,6 +16,7 @@ import {
   agentLinesEl,
   tabTerminalEl,
   tabFilesEl,
+  tabConversationEl,
   backBtnEl,
   overlayGroupEl,
   overlayMenuBtnEl,
@@ -43,6 +44,7 @@ import { initUsage } from './js/usage.js';
 import { initSubagents, startSubagentDebug } from './js/subagents.js';
 import { initAgentWindows } from './js/agentWindows.js';
 import { showFiles, leaveFiles } from './js/files.js';
+import { showConversation, leaveConversation } from './js/conversation.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
 import { initClaudeCodeUpdate } from './js/claudeCodeUpdate.js';
@@ -682,6 +684,7 @@ function closeOpenTerminal() {
   currentLoginSessionId = null;
   currentProject = null;
   terminalFrameEl.removeAttribute('src');
+  dropConversationSession();
   updateAccountBadge(null);
   updateAuthBanner(null);
   try {
@@ -1437,8 +1440,10 @@ function updateAccountBadge(session) {
 function activateTerminalTab() {
   tabTerminalEl.dataset.active = 'true';
   tabFilesEl.dataset.active = 'false';
+  tabConversationEl.dataset.active = 'false';
   terminalFrameEl.style.display = 'block';
   leaveFiles();
+  leaveConversation();
   // Via an attribute instead of an inline style: the bar is hidden on wide
   // screens through a media query, and an inline style would always
   // override that.
@@ -1458,12 +1463,51 @@ function activateTerminalTab() {
 function activateFilesTab(project = currentProject) {
   tabTerminalEl.dataset.active = 'false';
   tabFilesEl.dataset.active = 'true';
+  tabConversationEl.dataset.active = 'false';
   terminalFrameEl.style.display = 'none';
   appEl.dataset.tab = 'files';
+  leaveConversation();
   // The text view covers the same area and would otherwise sit on top of
   // the file list - it doesn't belong there.
   leaveCopyText();
   showFiles(project);
+  updateOnboardingWizard(allAccounts(), projects);
+}
+
+// Which row is in the terminal, as an object rather than an id: the
+// conversation route is keyed on the carrier, and openSessionId() alone
+// hands back only the id (see the comment there for the /clear detour it
+// exists for).
+function openSessionRow() {
+  const sessions = currentProject?.sessions ?? [];
+  return sessions.find((s) => s.id === openSessionId(sessions)) ?? null;
+}
+
+// The conversation is bound to one session, and showConversation() only runs
+// when the tab is entered - so a session that goes away while this tab is ON
+// SCREEN has to be reported here. Both callers deliberately leave the tab
+// standing (see the release handler), which is right for the files tab and
+// would otherwise leave a composer over a session this UI no longer holds.
+function dropConversationSession() {
+  if (appEl.dataset.tab === 'conversation') showConversation(null);
+}
+
+// The third view. Same shape as activateFilesTab: the terminal iframe is
+// hidden, never unloaded - window.term has to survive, because this view
+// sends its input back out through it.
+//
+// The keybar is deliberately NOT hidden here (unlike on the files tab): it
+// is this view's keyboard, and the composer sits above it rather than in its
+// place.
+function activateConversationTab() {
+  tabTerminalEl.dataset.active = 'false';
+  tabFilesEl.dataset.active = 'false';
+  tabConversationEl.dataset.active = 'true';
+  terminalFrameEl.style.display = 'none';
+  appEl.dataset.tab = 'conversation';
+  leaveFiles();
+  leaveCopyText();
+  showConversation(openSessionRow());
   updateOnboardingWizard(allAccounts(), projects);
 }
 
@@ -1644,6 +1688,7 @@ overlayMenuReleaseEl.addEventListener('click', () => {
   currentSessionId = null;
   currentLoginSessionId = null; // the iframe now shows about:blank
   leaveCopyText();
+  dropConversationSession();
   // currentProject stays: the files tab shows the project folder and is
   // just as usable without an open terminal.
   updateAccountBadge(null);
@@ -1679,9 +1724,11 @@ function openCopyMenu() {
 
 copySelectionBtnEl.addEventListener('click', openCopyMenu);
 
-// Tab switch between the terminal (ttyd iframe) and the built-in file view
-// (js/files.js). The keybar sends synthetic keyboard events into the
-// ttyd iframe and is therefore hidden on the files tab.
+// Tab switch between the terminal (ttyd iframe), the built-in file view
+// (js/files.js) and the conversation (js/conversation.js). The keybar sends
+// synthetic keyboard events into the ttyd iframe and is therefore hidden on
+// the files tab - but not on the conversation tab, which uses it as its own
+// keyboard.
 //
 // Deliberately tied only to currentProject and not to currentSessionId:
 // after "release terminal" the project stays selected, and the files tab
@@ -1692,6 +1739,7 @@ tabTerminalEl.addEventListener('click', activateTerminalTab);
 // MouseEvent as activateFilesTab's first argument, landing in its `project`
 // parameter instead of falling through to the currentProject default.
 tabFilesEl.addEventListener('click', () => activateFilesTab());
+tabConversationEl.addEventListener('click', activateConversationTab);
 
 // Client-side filter over project and session names (visibility only, no
 // server request) – render() automatically expands projects with matches,

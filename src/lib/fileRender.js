@@ -170,7 +170,16 @@ function sanitizeOptions({ projectId, directoryRel }) {
       },
       a(tagName, attribs) {
         const relativePath = resolveRawHtmlTarget(attribs.href, directoryRel);
-        if (!relativePath) return { tagName, attribs };
+        if (!relativePath) {
+          // A target that survives resolution leads out of this document -
+          // and this document carries the terminal iframe: without
+          // target/rel a tap navigates the page away and every open
+          // terminal has to reconnect. The link() renderer sets both for a
+          // markdown link; raw HTML reaches only here. A fragment is the
+          // one exception, since it points into this page.
+          if (!attribs.href || attribs.href.startsWith('#')) return { tagName, attribs };
+          return { tagName, attribs: { ...attribs, target: '_blank', rel: 'noopener noreferrer' } };
+        }
         return { tagName, attribs: { ...attribs, href: '#', 'data-file-path': relativePath } };
       },
     },
