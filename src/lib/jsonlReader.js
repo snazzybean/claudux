@@ -47,3 +47,39 @@ export function readAppendedLines(filePath, offset) {
   // it whole.
   return { text: Buffer.concat(complete).toString('utf8'), offset: at - carry.length };
 }
+
+// A window somewhere in the middle of the file, for paginating upwards. The
+// caller knows the byte offset it last started at and asks for what sits
+// before it; the cut almost never lands on a line boundary, so the first
+// partial line is dropped and the real start is reported back.
+export function readWindow(filePath, from, to) {
+  const size = fs.statSync(filePath).size;
+  const start = Math.max(0, Math.min(from, size));
+  const end = Math.max(start, Math.min(to, size));
+  if (end === start) return { text: '', from: start };
+
+  const fd = fs.openSync(filePath, 'r');
+  const buffer = Buffer.alloc(end - start);
+  try {
+    fs.readSync(fd, buffer, 0, buffer.length, start);
+  } finally {
+    fs.closeSync(fd);
+  }
+  // Byte 0 is a line start by definition - only a window that begins
+  // elsewhere can have caught a line mid-way.
+  if (start === 0) return { text: buffer.toString('utf8'), from: 0 };
+  const firstNewline = buffer.indexOf(0x0a);
+  // Either there's no line end in the window at all, or the only one is the
+  // window's very last byte - both leave nothing after it, so `from` would
+  // land on `end`, i.e. on the exact `to` this call was asked with. The next
+  // page-backward call would then repeat this same window forever. Reporting
+  // `start` instead makes each retry strictly widen the window backward
+  // until a line end with content after it is finally caught.
+  if (firstNewline === -1 || start + firstNewline + 1 >= end) {
+    return { text: '', from: start };
+  }
+  return {
+    text: buffer.subarray(firstNewline + 1).toString('utf8'),
+    from: start + firstNewline + 1,
+  };
+}
