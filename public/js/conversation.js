@@ -11,9 +11,11 @@ import {
   conversationQueueEl,
   conversationComposerEl,
   conversationInputEl,
+  conversationAttachEl,
 } from './dom.js';
-import { checkResponse, showError } from './messages.js';
+import { checkResponse, showError, showToast } from './messages.js';
 import { fillAlertIcons } from './icons.js';
+import { pasteTextIntoTerminal, sendKey } from './terminal.js';
 
 // One state per session, so a tab switch comes back where it left off - the
 // same idea as lastDirectory in files.js. Keyed on the CARRIER, which is
@@ -56,6 +58,11 @@ function stateFor(carrier) {
       tailAt: 0,
       reading: false,
       loadingOlder: false,
+      // What was sent from here and has not shown up in the transcript yet,
+      // one entry per card (see send). Per session, not per module: the cards
+      // hang in the one stream element every session shares, and a switch has
+      // to take them off the screen without losing them.
+      pending: [],
       // Whether the route still knows this session. It belongs here and not
       // on the composer's `hidden`, because three places set that flag and
       // only one of them can find this out: entering the tab decides from
@@ -264,6 +271,11 @@ const BOTTOM_SLACK = 40;
 const TOP_TRIGGER = 80;
 
 let timer = null;
+// Every read that is started gets the next number. A card remembers the last
+// one handed out before it was made, and only a read past that may answer for
+// it (see reconcilePending) - a read in flight when the message went out
+// carries a picture of the file from before it.
+let readNo = 0;
 let stickToBottom = true;
 let newCount = 0;
 // Until when a scroll event is this module's own. Restoring the position
@@ -296,7 +308,11 @@ function pollWait() {
   return session?.activity === 'working' ? BUSY_MS : IDLE_MS;
 }
 
-function showNotice(text) {
+// `keep` is what stays under the notice, and it is passed in rather than
+// picked out of the dom: the cards for what was sent belong to one session's
+// state, and scraping them off the screen would carry the previous session's
+// into the next one's empty view.
+function showNotice(text, keep = []) {
   // Muted first: the stream is a live region, and a notice replacing a
   // transcript is not something to read out.
   conversationStreamEl.setAttribute('aria-live', 'off');
@@ -308,7 +324,16 @@ function showNotice(text) {
   const notice = document.createElement('div');
   notice.className = 'conversation-notice';
   notice.textContent = text;
-  conversationStreamEl.replaceChildren(notice);
+  conversationStreamEl.replaceChildren(notice, ...keep);
+}
+
+// An empty transcript in its two states. The second sentence exists because
+// the first one would contradict a card standing right underneath it: the
+// file really is empty, and what was sent is on its way there.
+function emptyNotice(state) {
+  return state.pending.length
+    ? 'Nothing in the transcript yet - what was sent stands below.'
+    : 'No conversation yet - send the first message.';
 }
 
 // What a node has to be rebuilt for: a signature of what the renderer reads,
@@ -328,11 +353,19 @@ function contentMark(event) {
 // A uuid is not a unique key - one transcript line can carry a thinking part
 // and a text part, and both events name that line. Counting repeats on both
 // sides, in the same order, is what makes the key unique.
-function syncStream(events) {
+//
+// `pending` are the cards for what was sent and is not in the transcript yet.
+// They travel through here rather than being appended past it: this function
+// removes whatever it did not want, so a card appended beside it would live
+// exactly until the next poll.
+function syncStream(events, pending) {
   const stream = conversationStreamEl;
   const existing = new Map();
   const inDom = new Map();
   for (const node of stream.children) {
+    // A card carries no uuid and answers to no event, so it must not be
+    // offered as a node one of them could reuse.
+    if (node.dataset.pending) continue;
     if (!node.classList.contains('conversation-event')) continue;
     const uuid = node.dataset.uuid ?? '';
     const nth = (inDom.get(uuid) ?? 0) + 1;
@@ -356,6 +389,9 @@ function syncStream(events) {
     node.dataset.mark = mark;
     wanted.push(node);
   }
+  // Last, and in the order they were sent: they are the newest thing on
+  // screen until the transcript catches up with them.
+  wanted.push(...pending);
 
   // A keyed patch: after each insert the node sits at `index`, so one
   // already in place costs nothing and anything left over is pushed behind
@@ -398,8 +434,8 @@ function showJump() {
 // while the reader has not left it, and a window loaded above must not move
 // the view at all.
 function render(state, { announce = false, scroll = 'end' } = {}) {
-  if (!state.events.length) {
-    showNotice('No conversation yet - send the first message.');
+  if (!state.events.length && !state.pending.length) {
+    showNotice(emptyNotice(state));
     return;
   }
   const held = conversationStreamEl.scrollHeight - conversationStreamEl.scrollTop;
@@ -408,7 +444,7 @@ function render(state, { announce = false, scroll = 'end' } = {}) {
   // announced, and a bulk build - a first look, a re-read, a window paged in
   // above - is not a whole transcript to read out.
   conversationStreamEl.setAttribute('aria-live', announce ? 'polite' : 'off');
-  syncStream(state.events);
+  syncStream(state.events, state.pending.map((entry) => entry.node));
   if (scroll === 'hold') scrollTo(conversationStreamEl.scrollHeight - held);
   else if (scroll === 'end' || stickToBottom) scrollTo(conversationStreamEl.scrollHeight);
 }
@@ -423,9 +459,14 @@ function render(state, { announce = false, scroll = 'end' } = {}) {
 // them would stand twice. What does change is the cursor the read started
 // from, and the state object itself, which starting over replaces.
 function stillCurrent(carrier, state, field, cursor) {
-  return carrierOf(session) === carrier
-    && stateBySession.get(carrier) === state
-    && state[field] === cursor;
+  return sameView(carrier, state) && state[field] === cursor;
+}
+
+// The half of that question a write without a cursor can ask - sending has no
+// byte offset it started from, but it does have a session and a state object,
+// and a restart replaces the latter without touching the former.
+function sameView(carrier, state) {
+  return carrierOf(session) === carrier && stateBySession.get(carrier) === state;
 }
 
 // Hidden whenever there is nothing to answer: no session picked, or one the
@@ -464,9 +505,10 @@ function sessionMissing(body, state) {
   // What was read stays readable - a dead session's conversation is still
   // its conversation.
   if (state.events.length) return;
-  showNotice(state.gone
-    ? 'This session is gone - pick another one in the list.'
-    : 'No conversation yet - send the first message.');
+  showNotice(
+    state.gone ? 'This session is gone - pick another one in the list.' : emptyNotice(state),
+    state.pending.map((entry) => entry.node),
+  );
 }
 
 // The first look, and the same read again later. `first` decides only how the
@@ -475,25 +517,30 @@ function sessionMissing(body, state) {
 async function loadTail({ first = true } = {}) {
   const carrier = carrierOf(session);
   const state = stateFor(carrier);
+  const readAt = readNo + 1;
+  readNo = readAt;
   state.reading = true;
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/conversation?tail=1`);
-    // Nothing switched tabs or sessions while the request was in flight?
-    // Every return below checks, because both write to the shared stream
-    // element.
-    if (carrier !== carrierOf(session)) return;
+    // Nothing switched tabs or sessions while the request was in flight, and
+    // no restart replaced the state this read belongs to? Every return below
+    // checks both, because they all write into the shared stream element -
+    // and because a card can be held by two state objects at once while a
+    // restart carries it over, so settling one from the abandoned side would
+    // stop the clock of a card that is still on screen.
+    if (!sameView(carrier, state)) return;
     if (res.status === 404) {
       // Stamped here too, or `tailIsDue` is true on every tick from now on
       // and this read runs every couple of seconds for as long as the tab
       // stays open.
       state.tailAt = Date.now();
       const body = await res.json().catch(() => null);
-      if (carrier !== carrierOf(session)) return;
+      if (!sameView(carrier, state)) return;
       sessionMissing(body, state);
       return;
     }
     const data = await (await checkResponse(res)).json();
-    if (carrier !== carrierOf(session)) return;
+    if (!sameView(carrier, state)) return;
     sessionAnswered(state);
     state.events = pairToolResults(data.events);
     state.from = data.from;
@@ -506,6 +553,10 @@ async function loadTail({ first = true } = {}) {
     if ('queue' in data) state.queue = data.queue;
     if ('permissionMode' in data) state.permissionMode = data.permissionMode;
     state.tailAt = Date.now();
+    reconcilePending(state, readAt);
+    // Only a tail read carries the queue, and it is the other place a sent
+    // message can turn up.
+    markQueued(state);
     render(state, { scroll: first ? 'end' : 'follow' });
   } finally {
     state.reading = false;
@@ -525,8 +576,17 @@ function tailIsDue(state) {
 // Everything on screen is dropped and the end of the file read afresh.
 // Clearing the state object is what makes every read still in flight discard
 // itself rather than write into the new view (see stillCurrent).
-async function restart(carrier) {
+// `keepPending` decides what happens to a card for something sent that the
+// transcript had not shown yet, and the caller is the only one who knows: a
+// window cut at the event cap says nothing about that message, a transcript
+// that has been replaced says it was processed (see poll).
+async function restart(carrier, { keepPending = false } = {}) {
+  const held = stateBySession.get(carrier)?.pending ?? [];
+  // Dropped cards have their clocks stopped here - a timer left running would
+  // put a receipt on a node that belongs to no view any more.
+  if (!keepPending) for (const entry of held) clearTimeout(entry.timer);
   stateBySession.delete(carrier);
+  if (keepPending) stateFor(carrier).pending.push(...held);
   stickToBottom = true;
   hideJump();
   await loadTail();
@@ -575,6 +635,8 @@ async function poll() {
     return;
   }
   const sent = state.offset;
+  const readAt = readNo + 1;
+  readNo = readAt;
   const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/conversation?after=${sent}`);
   // Handled here as well as in the tail read, not left to it: a session that
   // goes away is answered with 404 on every tick, and waiting for the tail
@@ -607,10 +669,17 @@ async function poll() {
   //
   // None of the three leaves a scroll position worth holding: the turns it
   // pointed at are not in the window that comes back.
+  //
+  // They differ in one thing, and a card for something just sent hangs off it:
+  // a different transcript means a /clear did what it was asked, so that
+  // message is accounted for and a card left standing would only go on to
+  // claim it never arrived. The other two are this view's own trouble and say
+  // nothing at all about the message - so the cards come along, and can still
+  // find their turn in the window that comes back.
   if (data.transcriptId !== state.transcriptId
     || data.from !== sent
     || data.events.length >= MAX_WINDOW_EVENTS) {
-    await restart(carrier);
+    await restart(carrier, { keepPending: data.transcriptId === state.transcriptId });
     return;
   }
   // The offset and nothing else. A poll does not walk the tree, so
@@ -631,6 +700,7 @@ async function poll() {
     newCount += added;
     showJump();
   }
+  reconcilePending(state, readAt);
   render(state, { announce: true, scroll: 'follow' });
 }
 
@@ -679,6 +749,12 @@ async function loadOlder() {
       state.atStart = data.atStart;
       state.chainAnchor = data.chainAnchor;
       if (data.events.length) {
+        // Marked for where they came from: these bytes precede the cursor this
+        // view already had, and a message just sent cannot be in them. Without
+        // the mark, scrolling up would hand reconcilePending a matching turn
+        // from any point in the conversation - and a card for a message that
+        // never arrived would come off the screen.
+        for (const event of data.events) event.pagedIn = true;
         state.events = pairToolResults([...data.events, ...state.events]);
         render(state, { scroll: 'hold' });
         return;
@@ -726,8 +802,10 @@ export function showConversation(nextSession) {
     return;
   }
   // What was loaded before stays on screen while the fresh read is in
-  // flight, so coming back to this tab doesn't blank it first.
-  if (state.events.length) render(state, { scroll: 'end' });
+  // flight, so coming back to this tab doesn't blank it first. A card for
+  // something sent counts as loaded: it is the only trace of that message
+  // until the transcript has it.
+  if (state.events.length || state.pending.length) render(state, { scroll: 'end' });
   else showNotice('Loading the conversation…');
   if (entryNeedsTail(state)) loadTail().catch((err) => showError(err.message));
   schedule();
@@ -767,7 +845,434 @@ export function fitInput() {
 }
 conversationInputEl.addEventListener('input', fitInput);
 
-// Nothing sends yet - that is the next step. The handler is needed
-// regardless: an unhandled submit navigates the page away and takes the
-// terminal iframe, and with it every open terminal, along with it.
-conversationComposerEl.addEventListener('submit', (event) => event.preventDefault());
+// ---------- sending, and saying so when it did not arrive ----------
+
+// How long a card waits for its own line before it says nothing came back.
+// Longer than the tail budget on purpose: a message sent into a running turn
+// goes into Claude Code's queue, the queue is only in the transcript as a
+// queue line - which produces no event - and it only travels on a tail read.
+// Anything shorter would call a perfectly queued message unconfirmed, which
+// is the far more common case. What is left for the receipt after the two
+// booleans below have caught "no terminal" and "not ready" is a pane with no
+// live claude behind it, and nothing about that is urgent.
+const PENDING_TIMEOUT_MS = 40_000;
+// How much of the longer key the shorter one has to be for containment to
+// count as the same message (see keyMatches).
+const MIN_KEY_SHARE = 0.5;
+// And how long a key has to be at all before being found INSIDE a longer turn
+// says anything: "ok" sits in "Look", "go" in "gone". A short message does not
+// need containment anyway - it renders as itself, so equality carries it.
+const MIN_CONTAIN_KEY = 12;
+// Mirrors MAX_QUEUE_CHARS in src/lib/sessionTranscript.js. Copied rather than
+// imported for the same reason MAX_WINDOW_EVENTS above is: this file runs in
+// the browser, which cannot reach a module under src/, and the repo has no
+// build step to inline one. It is the only reason a queue entry can be
+// shorter than the message it carries (see queueMatches).
+const MAX_QUEUE_CHARS = 1000;
+// A second look for the queue, shortly after the first: Claude Code writes
+// its queue line a moment after the Enter, so the tail read that sending
+// triggers can be just too early for it.
+const QUEUE_LOOK_MS = 1500;
+// What counts as a command rather than as text that happens to start with a
+// slash: the name shapes real transcripts show are letters, digits and `-_:`
+// after it, and nothing else. A path is what this rules out - the composer
+// inserts an uploaded image as `/tmp/claudux-uploads/…`, and a message that is
+// nothing but that path would otherwise take a command's receipt instead of
+// the one an ordinary message gets.
+const COMMAND_RE = /^\/[a-z\d][a-z\d:_-]*$/i;
+
+let sending = false;
+
+// The transcript comes back as html rendered from markdown, so it carries
+// neither the asterisks that were typed nor the line breaks. Letters and
+// digits are what survives both sides, and comparing on those is what lets a
+// formatted message still recognise itself.
+//
+// A message with no letters or digits in it at all - a single emoji is the
+// one that gets typed on a phone - would leave nothing to compare on. Then
+// the text itself carries the key, whitespace out: there is no markdown in it
+// for the rendering to have changed.
+function compareKey(text) {
+  const letters = String(text ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  return letters || String(text ?? '').replace(/\s+/gu, '');
+}
+
+function turnText(html) {
+  // Into a template, for the same reason markdownNode uses one: its content
+  // is inert, so no image in the turn issues a request just to be read.
+  const template = document.createElement('template');
+  template.innerHTML = String(html ?? '');
+  return template.content.textContent ?? '';
+}
+
+// Equality first, and for a short message that is the whole rule. Beyond it
+// the two directions are different questions:
+//
+// The turn is LONGER - it carries the message and something else. A short key
+// found inside it is no evidence at all, hence the floor; above the floor it
+// still has to be most of the turn.
+//
+// The turn is SHORTER - rendering dropped something that was typed, a code
+// fence's language tag being the case that occurs. Then what is left has to be
+// most of the message, and there is no floor: the loss is small by nature.
+//
+// This branch is deliberately kept although it can be fooled - a foreign turn
+// "thanks" answers for a sent "ok thanks". Nothing in the text separates that
+// from the case the branch exists for (`jsfoo` against `foo`): same distance,
+// same suffix. So one of the two has to give, and this is the cheaper way
+// round - the false positive now needs a foreign user turn arriving AFTER the
+// send that carries most of what was sent, which means someone typing into the
+// terminal in the same moment, while dropping the branch would make every code
+// block sent from here read "Not confirmed".
+function keyMatches(sentKey, turnKey) {
+  if (!sentKey || !turnKey) return false;
+  if (sentKey === turnKey) return true;
+  if (turnKey.length > sentKey.length) {
+    return sentKey.length >= MIN_CONTAIN_KEY
+      && turnKey.includes(sentKey)
+      && sentKey.length >= turnKey.length * MIN_KEY_SHARE;
+  }
+  return sentKey.includes(turnKey) && turnKey.length >= sentKey.length * MIN_KEY_SHARE;
+}
+
+// A slash command is a different kind of message and takes a different test.
+// Claude Code does not write it into the transcript as it was typed: it wraps
+// it, and the wrapper can bring the whole expanded prompt along - many times
+// the length of what was typed, which no share of a normalised key survives.
+// What every one of them does carry is the command itself, verbatim and with
+// its slash, and that is the stronger test anyway: nothing but this message
+// puts "/handoff" in a turn.
+function turnAnswers(entry, text, key) {
+  if (entry.command) return text.includes(entry.command);
+  return keyMatches(entry.key, key);
+}
+
+// The queue is a stricter question and gets a stricter rule - on the RAW text,
+// not on a normalised key: a queue entry is the message as it was typed,
+// nothing reformats it, and the server only ever cuts it at MAX_QUEUE_CHARS.
+// So equality, or - for a message that was cut - the sent text starting with
+// what survived, where only a genuine cut is allowed to be shorter and a cut
+// is exactly that long. Containment anywhere would let one of Claude Code's
+// own queued notifications claim the card of a short answer, and that card's
+// clock stops when it is marked.
+function queueMatches(entry, content) {
+  const waiting = String(content ?? '').trim();
+  if (!waiting) return false;
+  if (entry.text === waiting) return true;
+  // capText cuts one character short of the cap when the last one would be
+  // half a surrogate pair.
+  return waiting.length >= MAX_QUEUE_CHARS - 1 && entry.text.startsWith(waiting);
+}
+
+function uuidsOf(events) {
+  return new Set(events.map((event) => event.uuid));
+}
+
+// Its line is in the transcript, so the card has done its job.
+function settlePending(state, at) {
+  clearTimeout(state.pending[at].timer);
+  state.pending.splice(at, 1);
+}
+
+// Two things have to hold of a turn before it may answer for a card, and each
+// one closes a hole of its own:
+//
+// - It was not in the baseline the card took when the message went out: what
+//   stood on screen, plus what the file itself held a moment earlier (see
+//   readBaseline). That baseline rides with the CARD and not with the state,
+//   because the state object is exactly what a restart throws away - and after
+//   a restart the fresh tail read hands back the whole end of the file, where
+//   every old turn would otherwise look newly arrived.
+// - It came from a read that STARTED after the message went out. A read
+//   already in flight carries a picture of the file from before the message,
+//   however late it lands, and with nothing loaded yet - a big transcript, the
+//   tab just entered - its whole window would count as new.
+// - It was not paged in from before the cursor. A message just sent cannot be
+//   in bytes that precede the cursor this view already had, so nothing from a
+//   `before` read is a candidate at all (see loadOlder).
+//
+// A turn that matches nothing leaves every card standing, deliberately: a
+// `user` turn is not always a person's message - Claude Code queues
+// notifications of its own - and taking the oldest card away for any turn
+// that arrives would hide a message that is still waiting. A card that stays
+// and says "not confirmed" is a wrong sentence on screen; a card that
+// disappears is the same wrongness with nothing left to see.
+function reconcilePending(state, readAt) {
+  // Before anything is matched: a read that started BEFORE a card and only
+  // landed now shows what the file held before that message went out - turns
+  // written while this view was away included, which the window on screen
+  // never had, and a whole tail window where nothing had been read yet. They
+  // join the card's baseline; none of them is an answer to it.
+  for (const entry of state.pending) {
+    if (readAt > entry.readAt) continue;
+    for (const event of state.events) entry.known.add(event.uuid);
+  }
+  for (const event of state.events) {
+    if (event.kind !== 'user' || event.pagedIn || !state.pending.length) continue;
+    const text = turnText(event.html);
+    const key = compareKey(text);
+    const at = state.pending.findIndex((entry) => readAt > entry.readAt
+      && !entry.known.has(event.uuid)
+      && turnAnswers(entry, text, key));
+    if (at !== -1) settlePending(state, at);
+  }
+}
+
+// A message the transcript has taken into its queue is not unaccounted for -
+// it is waiting, which is a different sentence and stops the clock. The turn
+// that follows once it is processed takes the card away.
+//
+// And back again, which is the half that is easy to miss: an entry can leave
+// the queue without ever becoming a turn - an interrupt drops what was
+// waiting. "Waiting in the queue." would then stand there for good, a sentence
+// in the present tense about something that is not happening. So a card whose
+// entry is gone goes back to waiting for a turn, clock and all.
+//
+// Only ever called where the queue is actually known (a tail read); a null
+// queue means unread, not empty, and must not un-queue anything.
+function markQueued(state) {
+  if (!state.pending.length || !state.queue) return;
+  const waiting = state.queue.waiting ?? [];
+  for (const entry of state.pending) {
+    const marked = entry.node.dataset.pending === 'queued';
+    const queued = waiting.some((item) => queueMatches(entry, item?.content));
+    if (queued === marked) continue;
+    clearTimeout(entry.timer);
+    entry.node.dataset.pending = queued ? 'queued' : 'true';
+    entry.hint.textContent = queued ? 'Waiting in the queue.' : '';
+    if (!queued) entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
+  }
+}
+
+// The message as typed rather than rendered: what stands here is the field's
+// content on its way out, and running it through a renderer would show
+// something other than what was sent.
+function pendingCard(text) {
+  const node = document.createElement('div');
+  node.className = 'conversation-event conversation-user';
+  node.dataset.pending = 'true';
+  const hint = document.createElement('div');
+  hint.className = 'conversation-hint';
+  node.append(document.createTextNode(text), hint);
+  return { node, hint };
+}
+
+// The second watchman. The status this view knows can be two seconds old -
+// Claude Code writes it, the watcher reads it every 2000ms - and inside that
+// window a box can have opened: free text into one lands in its selection
+// field and does something other than intended. So the pane is asked again,
+// right before the keystrokes go out.
+//
+// What that answer can say today is whether the session is still there at
+// all, which the route checks against tmux itself. `dialog` joins the same
+// answer in the next step (readDialog on the server); an absent key reads as
+// "no box open", which is the only way round a guard like this may fail.
+async function refuseSend(carrier) {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/pane`);
+    if (res.status === 404) return 'This session is gone - pick another one in the list.';
+    if (!res.ok) return null;
+    const pane = await res.json();
+    if (pane.dialog?.open) return 'The session is asking something - answer that card first.';
+    return null;
+  } catch {
+    // A check that cannot be made must not stop the send: the two booleans
+    // and the receipt below still cover the send itself.
+    return null;
+  }
+}
+
+// What the transcript holds right now, asked BEFORE the Enter goes out: every
+// turn in that answer predates this message by construction. Nothing else can
+// tell a turn written while this view was away - the tab was elsewhere, the
+// cursor stood still, and the next poll hands all of it over at once - from an
+// answer to what is being sent. The window on screen cannot say it, and the
+// order of the reads cannot either: that poll legitimately starts after the
+// message and still carries what came before it.
+//
+// Runs beside the pane check rather than after it, so it costs no extra wait,
+// and its answer is only read - the poll's cursor stays where it was, so
+// nothing here takes events away from the view.
+async function readBaseline(carrier, offset) {
+  try {
+    const window = offset === null ? 'tail=1' : `after=${offset}`;
+    const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/conversation?${window}`);
+    if (!res.ok) return null;
+    return uuidsOf((await res.json()).events ?? []);
+  } catch {
+    // No baseline is still better than a blocked send: what is left is the
+    // window on screen plus the read order, which cover the common cases.
+    return null;
+  }
+}
+
+// Out through the very iframe the on-screen keyboard uses: term.paste plus a
+// synthetic Enter. A channel of its own would be a second driver beside the
+// claude process, and it could not carry a slash command - this lane can,
+// because nothing on the way can tell it from something typed.
+async function send() {
+  // A second tap while the pane is being read would send the same text twice
+  // and leave two cards that answer for one turn.
+  if (sending) return;
+  const text = conversationInputEl.value;
+  // Said rather than ignored: a field holding two rows of spaces does not look
+  // empty, and the button next to it would otherwise be the one control here
+  // that visibly does nothing. A toast and not the banner - nothing is wrong,
+  // there is just nothing to send.
+  if (!text.trim()) {
+    showToast('Nothing to send yet.');
+    return;
+  }
+  const carrier = carrierOf(session);
+  if (!carrier) return;
+  const state = stateFor(carrier);
+  const cursor = state.offset;
+  sending = true;
+  try {
+    const [refusal, baseline] = await Promise.all([refuseSend(carrier), readBaseline(carrier, cursor)]);
+    // The session can have been swapped while that was in flight, and the
+    // iframe with it - the paste would land in another session's terminal.
+    // The state object is checked along with it, the same pair every read on
+    // this path checks: a restart inside this one session leaves the carrier
+    // untouched, and the card would go into a state nothing renders from.
+    if (!sameView(carrier, state)) return;
+    if (refusal) {
+      showError(refusal);
+      return;
+    }
+    if (!pasteTextIntoTerminal(text)) {
+      showError('No terminal for this session yet - open the terminal tab once, then send.');
+      return;
+    }
+    if (!sendKey('Enter')) {
+      // The text got in and the Enter did not, so it is sitting in the
+      // terminal's input line. Clearing the field here would leave it
+      // nowhere to be seen but there.
+      showError('The terminal did not take the Enter - the text is in the terminal input.');
+      return;
+    }
+    const { node, hint } = pendingCard(text);
+    const trimmed = text.trim();
+    const first = trimmed.split(/\s/)[0];
+    const command = COMMAND_RE.test(first) ? first : null;
+    // A message that is nothing but a slash command gets a different sentence
+    // when the clock runs out, because the alarming one would not be true: the
+    // keystrokes went out - both halves said so - and whether the command
+    // leaves a line in the transcript is the command's own business. `/clear`
+    // writes one, `/cost` opens a panel and writes nothing at all, and which
+    // is which cannot be known from here; a list of the commands that write
+    // turns would be a list that rots. So the receipt keeps its alarm for an
+    // ordinary message, where a missing turn does mean something went wrong,
+    // and says what it actually knows for this one.
+    const bareCommand = command !== null && command === trimmed;
+    const entry = {
+      key: compareKey(text),
+      // The message as typed, for the two comparisons that must not go through
+      // a normalised key: the queue entry and a slash command.
+      text: trimmed,
+      // The command as typed, for a message that is one (see turnAnswers).
+      command,
+      // The picture the transcript has to differ from before a turn may answer
+      // for this card: what is on screen, plus what the file itself held a
+      // moment ago, plus the number of the last read that had started.
+      known: new Set([...uuidsOf(state.events), ...(baseline ?? [])]),
+      readAt: readNo,
+      node,
+      hint,
+      timer: null,
+      // A named function rather than an inline one: the clock is armed here and
+      // armed again when a card comes back out of the queue (see markQueued).
+      expire: () => {
+        node.dataset.pending = bareCommand ? 'sent' : 'stale';
+        hint.textContent = bareCommand
+          ? 'Sent - not every slash command leaves a line in the transcript.'
+          : 'Not confirmed - nothing in the transcript for it. Check the terminal.';
+      },
+    };
+    entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
+    state.pending.push(entry);
+    conversationInputEl.value = '';
+    fitInput();
+    // Sending is an act of returning to the end. Without this the view still
+    // counts as having left it, and the tail read below - which is gated on
+    // sitting at the end - would not run at all.
+    stickToBottom = true;
+    hideJump();
+    render(state, { scroll: 'end' });
+    // The queue and a transcript that has just been created are both things
+    // only a tail read sees, and sending changes both.
+    refreshConversation();
+    setTimeout(() => {
+      if (carrierOf(session) === carrier) refreshConversation();
+    }, QUEUE_LOOK_MS);
+  } finally {
+    sending = false;
+  }
+}
+
+// The handler is needed whether or not it sends: an unhandled submit
+// navigates the page away and takes the terminal iframe, and with it every
+// open terminal, along with it.
+conversationComposerEl.addEventListener('submit', (event) => {
+  event.preventDefault();
+  send();
+});
+
+// The desktop sends on Enter and breaks the line on Shift+Enter; a touch
+// keyboard has no comfortable Shift+Enter, so there Enter breaks the line and
+// the button sends. Keyed on the pointer rather than on the window width: a
+// narrow window on a desktop still has a real keyboard, and the same media
+// query already decides this field's font size in styles.css. A tablet with a
+// keyboard attached lands on the button side, which is the harmless one.
+conversationInputEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+  // Mid-composition, Enter belongs to the input method: it picks a candidate.
+  if (event.isComposing) return;
+  if (window.matchMedia('(pointer: coarse)').matches) return;
+  event.preventDefault();
+  send();
+});
+
+// The route's own allowlist (src/routes/uploads.js), so the picker cannot
+// offer a file it will reject.
+const ATTACH_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
+
+// The same call the terminal's paste handler makes: the route takes the raw
+// image body with its own content type, not a form field.
+async function attachImage(file) {
+  try {
+    const res = await fetch('/api/uploads/image', {
+      method: 'POST',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+    await checkResponse(res);
+    const { path: uploadedPath } = await res.json();
+    // The path goes into the field as text, exactly what the paste handler
+    // does with it: Claude Code reads an image from a path, and an attachment
+    // is part of the message being written rather than a message of its own.
+    const value = conversationInputEl.value;
+    const start = conversationInputEl.selectionStart ?? value.length;
+    const end = conversationInputEl.selectionEnd ?? start;
+    const insert = `${uploadedPath} `;
+    conversationInputEl.value = `${value.slice(0, start)}${insert}${value.slice(end)}`;
+    conversationInputEl.focus();
+    conversationInputEl.setSelectionRange(start + insert.length, start + insert.length);
+    // Assigning `value` fires no input event, so the field would keep the
+    // height of the shorter text.
+    fitInput();
+  } catch (err) {
+    showError(`Image upload failed: ${err.message}`);
+  }
+}
+
+conversationAttachEl.addEventListener('click', () => {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = ATTACH_TYPES;
+  picker.addEventListener('change', () => {
+    const file = picker.files?.[0];
+    if (file) attachImage(file);
+  });
+  picker.click();
+});

@@ -444,9 +444,15 @@ export function keyCodeFor(key) {
 // but we deliberately fall back to it if activeElement happens to be
 // something else for any reason (e.g. not focused yet), instead of sending
 // the event untargeted to doc.body.
+//
+// Reports whether the event reached the iframe at all, the same way
+// pasteTextIntoTerminal() does: right after a load there is no document for a
+// moment, and a control that silently does nothing is worse than one that
+// visibly fails. The keybar ignores the answer - a key that goes nowhere is
+// pressed again - but the composer in the conversation view says so.
 export function sendKey(key, ctrl, shift) {
   const doc = terminalFrameEl.contentDocument;
-  if (!doc) return; // iframe not loaded (same-origin) yet
+  if (!doc) return false; // iframe not loaded (same-origin) yet
   const target =
     doc.activeElement && doc.activeElement !== doc.body
       ? doc.activeElement
@@ -467,6 +473,7 @@ export function sendKey(key, ctrl, shift) {
   Object.defineProperty(event, 'keyCode', { get: () => code });
   Object.defineProperty(event, 'which', { get: () => code });
   target.dispatchEvent(event);
+  return true;
 }
 
 // [data-key]: deliberately separates the "real" key buttons from the

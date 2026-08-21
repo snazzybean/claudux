@@ -4021,6 +4021,37 @@ button { cursor: pointer; }
   color: var(--text-muted);
   font-size: var(--fs-meta);
 }
+/* A message sent from here, until its own line is in the transcript. Dimmed
+   rather than labelled: it reads as a turn that is not quite there yet, and
+   the two states below are what have something to say. `pre-wrap` because
+   this is the text as it was typed, not a rendered turn. */
+.conversation-event[data-pending] {
+  opacity: 0.55;
+  white-space: pre-wrap;
+}
+/* Taken into Claude Code's queue - no longer waiting on a confirmation, so it
+   stops looking like one. */
+.conversation-event[data-pending="queued"] { opacity: 0.8; }
+/* A message that was nothing but a slash command, once its clock has run out:
+   it went out, and whether the command writes a line in the transcript is the
+   command's own business. Nothing is wrong here, so nothing is marked - only
+   the dimming lifts, because the card is done waiting. */
+.conversation-event[data-pending="sent"] { opacity: 0.8; }
+/* Nothing came back for it. Class and attribute together outrank
+   .conversation-user's accent edge, which is the point: what this card says
+   now is that the send is unaccounted for. */
+.conversation-event[data-pending="stale"] {
+  opacity: 1;
+  border-left: 2px solid var(--danger);
+}
+/* What a card says about itself. Muted while it is only waiting; the colour
+   belongs to the state above, not to the element. */
+.conversation-hint {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-meta);
+}
+[data-pending="stale"] .conversation-hint { color: var(--danger); }
 .conversation-todo-list {
   margin: 0;
   padding-left: 1.4em;
