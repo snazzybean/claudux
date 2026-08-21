@@ -1,8 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
-  conversationEvents, MAX_RESULT_CHARS, MAX_PATCH_HUNKS, MAX_PATCH_LINES_PER_HUNK, MAX_DETAIL_CHARS,
+  conversationEvents, activeChain, segmentStarts, markAbandoned, queueState, conversationView,
+  MAX_RESULT_CHARS, MAX_PATCH_HUNKS, MAX_PATCH_LINES_PER_HUNK, MAX_DETAIL_CHARS, MAX_EVENTS,
+  MAX_QUEUE_CHARS,
 } from '../src/lib/sessionTranscript.js';
+import { readWindow } from '../src/lib/jsonlReader.js';
 
 const line = (entry) => `${JSON.stringify(entry)}\n`;
 
@@ -270,4 +276,438 @@ test('conversationEvents caps a long tool detail to one summary line', () => {
       input: { command: 'x'.repeat(MAX_DETAIL_CHARS + 500) } }] } });
   const [event] = conversationEvents(jsonl);
   assert.equal(event.detail.length, MAX_DETAIL_CHARS);
+});
+
+// --- the tree, its segments and the queue ---------------------------------
+
+// A transcript shaped like the real ones on this host: the tree's root is a
+// line that carries no message at all, a second root marks a fresh start,
+// and each segment carries a branch that was rewound away. `filler` pads
+// every line so a byte window holds a known handful of them; `fat` blows one
+// line up past a window's width.
+function forkedTranscript({ filler = '', fat = 0 } = {}) {
+  const say = (uuid, parentUuid, type, text) => line({
+    type, uuid, parentUuid, entrypoint: 'cli', message: { content: `${text} ${filler}` },
+  });
+  return [
+    line({ type: 'attachment', uuid: 'att', parentUuid: null }),
+    say('u1', 'att', 'user', 'first question'),
+    say('a1', 'u1', 'assistant', 'first answer'),
+    say('x1', 'a1', 'user', 'rewound inside the first segment'),
+    say('u2', 'a1', 'user', 'second question'),
+    say('a2', 'u2', 'assistant', 'second answer'),
+    line({ type: 'system', uuid: 'root2', parentUuid: null }),
+    say('u3', 'root2', 'user', 'a question after the fresh start'),
+    say('a3', 'u3', 'assistant', `an answer after the fresh start ${'z'.repeat(fat)}`),
+    say('x2', 'a3', 'user', 'rewound away'),
+    say('x3', 'x2', 'assistant', 'the answer to the rewound turn'),
+    say('u4', 'a3', 'user', 'the live turn'),
+    say('a4', 'u4', 'assistant', 'the live answer'),
+    line({ type: 'system', uuid: 'sys9', parentUuid: 'a4' }),
+    line({ type: 'queue-operation', operation: 'enqueue', content: 'still waiting' }),
+    line({ type: 'permission-mode', permissionMode: 'acceptEdits', sessionId: 'fixture-session' }),
+  ].join('');
+}
+
+// The line that was written last belongs to the branch the session is on.
+test('activeChain walks back from the last line of the file', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'one' } })
+    + line({ type: 'assistant', uuid: 'b', parentUuid: 'a', message: { content: 'two' } })
+    + line({ type: 'user', uuid: 'x', parentUuid: 'a', message: { content: 'abandoned branch' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: 'b', message: { content: 'three' } });
+  const walk = activeChain(jsonl);
+  assert.deepEqual([...walk.chain].sort(), ['a', 'b', 'c']);
+  assert.equal(walk.segmentStart, 'a');
+  assert.equal(walk.chainAnchor, null);
+  assert.equal(walk.anchored, true);
+});
+
+// Neither a `system` nor an `attachment` line produces an event, and they
+// are regularly the file's last line and the tree's root - a chain built
+// from events would break at both ends.
+test('activeChain anchors on a system line and roots on an attachment line', () => {
+  const walk = activeChain(forkedTranscript());
+  assert.equal(walk.anchored, true);
+  assert.deepEqual([...walk.chain], ['sys9', 'a4', 'u4', 'a3', 'u3', 'root2']);
+  assert.equal(walk.segmentStart, 'root2');
+  // Both segments carry a rewound branch; only the live segment's counts,
+  // because only its fork point sits on the path.
+  assert.deepEqual([...walk.retracted], ['x2', 'x3']);
+});
+
+test('activeChain starts from an explicit anchor instead of the last line', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'one' } })
+    + line({ type: 'assistant', uuid: 'b', parentUuid: 'a', message: { content: 'two' } })
+    + line({ type: 'user', uuid: 'x', parentUuid: 'a', message: { content: 'a branch of its own' } });
+  const walk = activeChain(jsonl, { anchor: 'b' });
+  assert.deepEqual([...walk.chain].sort(), ['a', 'b']);
+  assert.equal(walk.segmentStart, 'a');
+});
+
+// A window in the middle of the file holds no root: the walk runs out of
+// parents and has to say which one it was looking for, so the next window
+// back can carry on from there.
+test('activeChain reports the parent it ran out on as the next anchor', () => {
+  const jsonl =
+    line({ type: 'assistant', uuid: 'b', parentUuid: 'a', message: { content: 'two' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: 'b', message: { content: 'three' } });
+  const walk = activeChain(jsonl);
+  assert.deepEqual([...walk.chain].sort(), ['b', 'c']);
+  assert.equal(walk.segmentStart, null);
+  assert.equal(walk.chainAnchor, 'a');
+});
+
+// An anchor can be missing from a window that is too narrow to hold the
+// line it sits on. Carrying it forward unchanged lets the next, wider
+// window find it; reporting null would switch the filter off for the whole
+// rest of the scrollback.
+test('activeChain carries an unfound anchor forward and reports itself unanchored', () => {
+  const jsonl = line({ type: 'user', uuid: 'c', parentUuid: 'b', message: { content: 'three' } });
+  const walk = activeChain(jsonl, { anchor: 'somewhere-else' });
+  assert.equal(walk.anchored, false);
+  assert.equal(walk.chainAnchor, 'somewhere-else');
+  assert.deepEqual([...walk.chain], []);
+});
+
+test('segmentStarts finds every root in file order', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'first talk' } })
+    + line({ type: 'user', uuid: 'b', parentUuid: 'a', message: { content: 'more' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: null, message: { content: 'after a compact' } });
+  assert.deepEqual(segmentStarts(jsonl), ['a', 'c']);
+});
+
+// A line with a null parent and no uuid of its own is not a root - it has
+// no identity to be one with.
+test('segmentStarts ignores a null-parent line that carries no uuid', () => {
+  const jsonl =
+    line({ type: 'attachment', parentUuid: null, content: 'a pasted file' })
+    + line({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'the real root' } });
+  assert.deepEqual(segmentStarts(jsonl), ['a']);
+});
+
+// The big mistake would be hiding everything before a second root: that is
+// real conversation, not an abandoned branch.
+test('markAbandoned keeps a whole earlier segment and drops only real siblings', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'a', parentUuid: null, message: { content: 'segment one' } })
+    + line({ type: 'user', uuid: 'b', parentUuid: 'a', message: { content: 'still segment one' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: null, message: { content: 'segment two' } })
+    + line({ type: 'user', uuid: 'd', parentUuid: 'c', message: { content: 'rewound away' } })
+    + line({ type: 'user', uuid: 'e', parentUuid: 'c', message: { content: 'the live one' } });
+  const result = markAbandoned(conversationEvents(jsonl), activeChain(jsonl));
+  assert.deepEqual(result.events.map((e) => e.uuid), ['a', 'b', 'c', 'e']);
+  assert.equal(result.abandoned, 1);
+});
+
+// The root of the live segment is usually a line that produces no event, so
+// the boundary cannot be found by watching event uuids go past.
+test('markAbandoned finds the segment boundary on a line that produces no event', () => {
+  const jsonl = forkedTranscript();
+  const result = markAbandoned(conversationEvents(jsonl), activeChain(jsonl));
+  assert.deepEqual(result.events.map((e) => e.uuid), ['u1', 'a1', 'x1', 'u2', 'a2', 'u3', 'a3', 'u4', 'a4']);
+  assert.equal(result.abandoned, 2);
+});
+
+// A window that begins inside the live segment has no root of its own; every
+// off-chain turn in it is a sibling that was rewound away.
+test('markAbandoned filters a whole window whose segment start lies before it', () => {
+  const jsonl =
+    line({ type: 'assistant', uuid: 'b', parentUuid: 'a', message: { content: 'two' } })
+    + line({ type: 'user', uuid: 'x', parentUuid: 'b', message: { content: 'rewound away' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: 'b', message: { content: 'the live one' } });
+  const result = markAbandoned(conversationEvents(jsonl), activeChain(jsonl));
+  assert.deepEqual(result.events.map((e) => e.uuid), ['b', 'c']);
+  assert.equal(result.abandoned, 1);
+});
+
+test('markAbandoned keeps everything when the anchor was never found', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'x', parentUuid: 'b', message: { content: 'rewound away' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: 'b', message: { content: 'the live one' } });
+  const result = markAbandoned(conversationEvents(jsonl), activeChain(jsonl, { anchor: 'not-in-here' }));
+  assert.deepEqual(result.events.map((e) => e.uuid), ['x', 'c']);
+  assert.equal(result.abandoned, 0);
+});
+
+test('queueState rebuilds what is waiting', () => {
+  const jsonl =
+    line({ type: 'queue-operation', operation: 'enqueue', content: 'first waiting' })
+    + line({ type: 'queue-operation', operation: 'enqueue', content: 'second waiting' })
+    + line({ type: 'queue-operation', operation: 'dequeue' });
+  assert.deepEqual(queueState(jsonl).waiting, [{ content: 'second waiting' }]);
+});
+
+test('queueState removes a specific entry and empties on popAll', () => {
+  const removed =
+    line({ type: 'queue-operation', operation: 'enqueue', content: 'keep me' })
+    + line({ type: 'queue-operation', operation: 'enqueue', content: 'take me back' })
+    + line({ type: 'queue-operation', operation: 'remove', content: 'take me back' });
+  assert.deepEqual(queueState(removed).waiting, [{ content: 'keep me' }]);
+
+  const cleared = removed + line({ type: 'queue-operation', operation: 'popAll', content: 'keep me' });
+  assert.deepEqual(queueState(cleared).waiting, []);
+});
+
+// Saying "one waiting message" without text beats inventing one.
+test('queueState keeps a contentless entry as an unknown one', () => {
+  const jsonl = line({ type: 'queue-operation', operation: 'enqueue' });
+  assert.deepEqual(queueState(jsonl).waiting, [{ content: null }]);
+});
+
+// A `remove` whose `enqueue` sits outside the window has nothing to match.
+// Dropping the head instead would report an empty queue while a message is
+// waiting.
+test('queueState ignores a remove it cannot match', () => {
+  const jsonl =
+    line({ type: 'queue-operation', operation: 'enqueue', content: 'still waiting' })
+    + line({ type: 'queue-operation', operation: 'remove', content: 'enqueued in an older window' });
+  assert.deepEqual(queueState(jsonl).waiting, [{ content: 'still waiting' }]);
+});
+
+// What gets queued is not always something a person typed: Claude Code
+// queues its own task notifications, which are XML blobs.
+test('queueState caps a queued blob and keeps a message at the cap whole', () => {
+  const exact = line({ type: 'queue-operation', operation: 'enqueue', content: 'q'.repeat(MAX_QUEUE_CHARS) });
+  assert.equal(queueState(exact).waiting[0].content.length, MAX_QUEUE_CHARS);
+
+  const over = line({ type: 'queue-operation', operation: 'enqueue', content: 'q'.repeat(MAX_QUEUE_CHARS + 400) });
+  assert.equal(queueState(over).waiting[0].content.length, MAX_QUEUE_CHARS);
+});
+
+test('conversationView caps the number of events and keeps the newest', () => {
+  let jsonl = '';
+  for (let i = 0; i < 250; i++) {
+    jsonl += line({ type: 'user', uuid: `u${i}`, parentUuid: i === 0 ? null : `u${i - 1}`, message: { content: `m${i}` } });
+  }
+  const view = conversationView(jsonl);
+  assert.equal(view.events.length, MAX_EVENTS);
+  assert.equal(view.events.at(-1).uuid, 'u249');
+});
+
+test('conversationView reports the queue and every root beside the events', () => {
+  const view = conversationView(forkedTranscript());
+  assert.deepEqual(view.queue.waiting, [{ content: 'still waiting' }]);
+  assert.deepEqual(view.segmentStarts, ['att', 'root2']);
+  assert.equal(view.segmentStart, 'root2');
+});
+
+// A window paged past the root of the live segment has nothing left to
+// judge: everything older than the root is conversation. Walking the tree
+// anyway would anchor the next window's filter on a branch nobody asked
+// about.
+test('conversationView keeps every event and reports no anchor when told not to filter', () => {
+  const jsonl = forkedTranscript();
+  const view = conversationView(jsonl, { filtered: false });
+  assert.deepEqual(view.events.map((e) => e.uuid), ['u1', 'a1', 'x1', 'u2', 'a2', 'u3', 'a3', 'x2', 'x3', 'u4', 'a4']);
+  assert.equal(view.abandoned, 0);
+  assert.equal(view.chainAnchor, null);
+  assert.equal(view.anchored, false);
+
+  // An anchor passed alongside it is handed back, not dropped: losing it
+  // would break the chain for every window after this one.
+  assert.equal(conversationView(jsonl, { anchor: 'u4', filtered: false }).chainAnchor, 'u4');
+});
+
+// A window's walk starts where the caller pointed it, and nothing in the
+// window says how the chain arrived there - in a newer window it can be a
+// resume marker that jumped over this branch. So the fork at the walk's own
+// starting point is not judged.
+test('activeChain does not judge the fork at the line it started from', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'fork', parentUuid: 'older', entrypoint: 'cli',
+      message: { content: 'the line the caller anchored on' } })
+    + line({ type: 'user', uuid: 'beside', parentUuid: 'fork', entrypoint: 'cli',
+      message: { content: 'a branch beside the anchor' } });
+  const walk = activeChain(jsonl, { anchor: 'fork' });
+  assert.deepEqual([...walk.chain], ['fork']);
+  assert.deepEqual([...walk.retracted], []);
+  assert.equal(walk.chainAnchor, 'older');
+});
+
+// A parent link can name a line further down the file. The walk cannot
+// follow that backwards, so a window it cuts through must keep what it
+// could not reach - this is the shape that hid live conversation when
+// everything off the path counted as abandoned.
+test('activeChain keeps what a forward parent link put out of reach', () => {
+  const windowText =
+    line({ type: 'user', uuid: 'first', parentUuid: 'root', message: { content: 'a turn on the live path' } })
+    + line({ type: 'user', uuid: 'old', parentUuid: 'later', message: { content: 'hangs off a line further down' } });
+  const walk = activeChain(windowText, { anchor: 'old' });
+  assert.equal(walk.anchored, true);
+  assert.deepEqual([...walk.chain], ['old']);
+  assert.deepEqual([...walk.retracted], []);
+  assert.equal(walk.chainAnchor, 'later');
+});
+
+// A turn is only recognisable as taken back where its fork point is, and
+// paging backwards reaches the fork after the turn that hangs off it. This
+// is the direction to be wrong in: one turn too many on screen, never one
+// missing.
+test('markAbandoned keeps a rewound turn whose fork point lies outside the window', () => {
+  const fork = line({ type: 'assistant', uuid: 'a', parentUuid: null, message: { content: 'the fork point' } });
+  const rest =
+    line({ type: 'user', uuid: 'x', parentUuid: 'a', message: { content: 'rewound away' } })
+    + line({ type: 'user', uuid: 'c', parentUuid: 'a', message: { content: 'the live one' } });
+
+  const whole = markAbandoned(conversationEvents(fork + rest), activeChain(fork + rest));
+  assert.deepEqual(whole.events.map((e) => e.uuid), ['a', 'c']);
+  assert.equal(whole.abandoned, 1);
+
+  const window = markAbandoned(conversationEvents(rest), activeChain(rest, { anchor: 'c' }));
+  assert.deepEqual(window.events.map((e) => e.uuid), ['x', 'c']);
+  assert.equal(window.abandoned, 0);
+});
+
+// One request's tool calls are separate lines under one parent, and their
+// results come back in whatever order they finish - so the call whose result
+// landed last is the one on the path and its siblings hang off the same
+// parent. They are one turn, not a fork.
+test('activeChain keeps a live turn\'s parallel tool calls', () => {
+  const request = 'req_fixture_a';
+  const call = (uuid, parentUuid, id, command, req) => line({
+    type: 'assistant', uuid, parentUuid, requestId: req, entrypoint: 'cli',
+    message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] },
+  });
+  const result = (uuid, parentUuid, id, text) => line({
+    type: 'user', uuid, parentUuid, entrypoint: 'cli',
+    message: { content: [{ type: 'tool_result', tool_use_id: id, content: text }] },
+  });
+  const jsonl = call('callA', 'turn', 'toolu_a', 'echo a', request)
+    + call('callB', 'callA', 'toolu_b', 'echo b', request)
+    + result('resB', 'callB', 'toolu_b', 'b')
+    + result('resA', 'callA', 'toolu_a', 'a');
+
+  const walk = activeChain(jsonl);
+  assert.deepEqual([...walk.chain], ['resA', 'callA']);
+  assert.deepEqual([...walk.retracted], []);
+  const marked = markAbandoned(conversationEvents(jsonl), walk);
+  assert.deepEqual(marked.events.map((e) => e.detail), ['echo a', 'echo b']);
+  assert.deepEqual(marked.events.map((e) => e.resultLoaded), [true, true]);
+  assert.equal(marked.abandoned, 0);
+
+  // A turn re-generated after a rewind is a different request, so that fork
+  // is still a fork.
+  const rewound = call('callA', 'turn', 'toolu_a', 'echo a', request)
+    + call('callB', 'callA', 'toolu_b', 'echo b', 'req_fixture_b')
+    + result('resB', 'callB', 'toolu_b', 'b')
+    + result('resA', 'callA', 'toolu_a', 'a');
+  assert.deepEqual([...activeChain(rewound).retracted], ['callB', 'resB']);
+});
+
+// A session resumed after an interrupt writes a marker line parented to a
+// turn from before the interrupt, so the walk reaches that turn through the
+// marker rather than through the conversation. Everything done in between
+// hangs off that same turn and is not a branch beside it.
+test('activeChain keeps the work a resume marker jumps over', () => {
+  const jsonl =
+    line({ type: 'user', uuid: 'before', parentUuid: null, entrypoint: 'cli',
+      message: { content: 'the turn the session was interrupted on' } })
+    + line({ type: 'user', uuid: 'work1', parentUuid: 'before', entrypoint: 'cli',
+      message: { content: 'work carried on after the interrupt' } })
+    + line({ type: 'assistant', uuid: 'work2', parentUuid: 'work1', entrypoint: 'cli',
+      message: { content: 'and more of it' } })
+    + line({ type: 'user', uuid: 'resume', parentUuid: 'before', isMeta: true, entrypoint: 'cli',
+      message: { content: 'Continue from where you left off.' } })
+    + line({ type: 'assistant', uuid: 'after', parentUuid: 'resume', entrypoint: 'cli',
+      message: { content: 'carrying on' } });
+
+  const walk = activeChain(jsonl);
+  assert.deepEqual([...walk.chain], ['after', 'resume', 'before']);
+  assert.deepEqual([...walk.retracted], []);
+  const marked = markAbandoned(conversationEvents(jsonl), walk);
+  assert.deepEqual(marked.events.map((e) => e.uuid), ['before', 'work1', 'work2', 'after']);
+  assert.equal(marked.abandoned, 0);
+});
+
+// --- the invariant: windows compose into the whole file -------------------
+
+const identify = (event) => `${event.kind}:${event.uuid}`;
+
+function tmpTranscript(contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-st-'));
+  const file = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(file, contents);
+  return file;
+}
+
+// What the route has to do, and the reason this is a test and not a note:
+// the view starts at the end of the file and pages backwards, carrying the
+// chain anchor from one window into the next. A window that comes back empty
+// is widened until it holds a line end, which is also what pulls in a line
+// too long to fit one window. An anchor the window does not contain is
+// deliberately NOT chased: the walk's own start cannot be judged as a fork
+// point anyway, so a missing anchor costs a little filtering and nothing
+// else, while chasing one that can never be found - a parent named further
+// down the file - reads the file back to byte 0. Once the walk reaches the
+// root of the live segment the anchor comes back null: everything further
+// back is conversation.
+function pageBackwards(file, windowBytes) {
+  const size = fs.statSync(file).size;
+  const events = [];
+  const seen = new Set();
+  let to = size;
+  let anchor = null;
+  let tail = true;
+  while (to > 0) {
+    let width = windowBytes;
+    let read;
+    let view;
+    for (;;) {
+      read = readWindow(file, Math.max(0, to - width), to);
+      view = tail ? conversationView(read.text) : conversationView(read.text, { anchor, filtered: anchor !== null });
+      if (read.text !== '' || read.from === 0 || width >= size) break;
+      width *= 2;
+    }
+    events.unshift(...view.events);
+    for (const event of conversationEvents(read.text)) seen.add(identify(event));
+    anchor = view.chainAnchor;
+    tail = false;
+    to = read.from;
+  }
+  return { events, seen };
+}
+
+// The property that holds at every window size, and the only one: paging
+// backwards never hides what a whole-file run keeps, and every event in the
+// file surfaces in some window. Equality of the two runs is NOT the
+// property - only the anchor crosses a window boundary, never the set of
+// retracted uuids, so a rewound branch is filtered in the window that holds
+// its fork point and nowhere else.
+function assertComposes(file, jsonl, windowBytes) {
+  const whole = conversationView(jsonl);
+  const composed = pageBackwards(file, windowBytes);
+  const kept = new Set(composed.events.map(identify));
+
+  const hidden = whole.events.map(identify).filter((id) => !kept.has(id));
+  assert.deepEqual(hidden, [], 'windowing hid events a whole-file run keeps');
+
+  const lost = conversationEvents(jsonl).map(identify).filter((id) => !composed.seen.has(id));
+  assert.deepEqual(lost, [], 'events that no window ever read');
+
+  return { whole, composed };
+}
+
+test('paging backwards never hides what a whole-file run keeps', () => {
+  const jsonl = forkedTranscript({ filler: 'y'.repeat(120) });
+  const file = tmpTranscript(jsonl);
+
+  // Pinned, not just compared against itself: the earlier segment survives
+  // whole (x1 included), only the rewound siblings of the live segment go.
+  const { whole } = assertComposes(file, jsonl, 700);
+  assert.deepEqual(whole.events.map((e) => e.uuid), ['u1', 'a1', 'x1', 'u2', 'a2', 'u3', 'a3', 'u4', 'a4']);
+  assert.equal(whole.abandoned, 2);
+});
+
+// The same, with one line wider than the window. Without the widening on an
+// empty read that line is never read at all: readWindow drops the partial
+// first line, and moving further back only ever yields another partial.
+test('paging backwards holds up across a line wider than the window', () => {
+  const jsonl = forkedTranscript({ filler: 'y'.repeat(120), fat: 3000 });
+  const file = tmpTranscript(jsonl);
+
+  const { composed } = assertComposes(file, jsonl, 700);
+  assert.equal(composed.events.some((e) => e.uuid === 'a3'), true);
 });

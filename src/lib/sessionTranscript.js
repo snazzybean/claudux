@@ -20,6 +20,10 @@ export const MAX_PATCH_LINES_PER_HUNK = 200;
 // would otherwise become one giant line and break the row instead of
 // summarizing it.
 export const MAX_DETAIL_CHARS = 300;
+// What is queued is not always something a person typed: Claude Code queues
+// its own task notifications, which are XML blobs. Long enough for any
+// prompt anyone types, short enough that one of those cannot fill the view.
+export const MAX_QUEUE_CHARS = 1000;
 
 // Line types that are control markup rather than conversation. `system`
 // lines are deliberately not here: they carry uuid/parentUuid for the
@@ -206,4 +210,187 @@ export function conversationEvents(jsonlText) {
     }
   }
   return events;
+}
+
+// Every uuid-bearing line names its parent, so a transcript is a tree and
+// Claude Code follows a PATH through it when it resumes - not the file. File
+// order alone shows branches the session has abandoned (a rewind does that
+// without any handover involved); the path alone hides everything before a
+// second root, which is real conversation. Hence neither: file order is the
+// ground, and a turn goes only where the fork it hangs off can be seen.
+
+// One place for the lines: every function below walks the same ones, and a
+// transcript read mid-write ends in a fragment rather than an error.
+function* entries(jsonlText) {
+  for (const rawLine of String(jsonlText ?? '').split('\n')) {
+    if (!rawLine.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+    yield entry;
+  }
+}
+
+// The tree, taken from the raw lines rather than from the events: `system`
+// and `attachment` lines carry uuid and parentUuid while producing no event
+// at all, and they are regularly both the last uuid-bearing line of a file
+// and the tree's root - an index built from events would break the chain at
+// both ends.
+function parentIndex(jsonlText) {
+  const parents = new Map();
+  const order = [];
+  // Which request wrote a line, and whether it is a marker rather than a
+  // turn: the fork test below needs both to tell a fork in the tree from a
+  // fork in the conversation.
+  const requests = new Map();
+  const markers = new Set();
+  for (const entry of entries(jsonlText)) {
+    if (typeof entry?.uuid !== 'string') continue;
+    parents.set(entry.uuid, typeof entry.parentUuid === 'string' ? entry.parentUuid : null);
+    order.push(entry.uuid);
+    if (typeof entry.requestId === 'string') requests.set(entry.uuid, entry.requestId);
+    if (entry.isMeta === true) markers.add(entry.uuid);
+  }
+  return { parents, order, requests, markers };
+}
+
+// The path the session is on, walked backwards from the last uuid-bearing
+// line. `anchor` is what makes that work on a byte window: a window in the
+// middle of a file has no last line of its own to start from, so the caller
+// hands over the uuid its previous walk was still looking for.
+export function activeChain(jsonlText, { anchor = null } = {}) {
+  const { parents, order, requests, markers } = parentIndex(jsonlText);
+  const start = anchor ?? order.at(-1) ?? null;
+  const chain = new Set();
+  let cursor = start !== null && parents.has(start) ? start : null;
+  const anchored = cursor !== null;
+  let segmentStart = null;
+  // Parents whose fork the walk cannot judge. Two of them: the line it
+  // started from, because nothing here says how the chain arrived there - on
+  // a byte window that line is an anchor handed over by the caller. And any
+  // parent it reached through a marker line, because a marker points back at
+  // where the session left off rather than at the turn before it, so the
+  // work done in between hangs off that same parent. Either way a branch
+  // beside it is not a branch that was taken back.
+  const blindForks = new Set(cursor === null ? [] : [cursor]);
+  // The guard is the loop bound, not a fear of cycles: a transcript read
+  // mid-write can name a parent that is not in the file yet.
+  while (cursor && parents.has(cursor) && !chain.has(cursor)) {
+    chain.add(cursor);
+    const parent = parents.get(cursor);
+    if (parent === null) {
+      segmentStart = cursor;
+      break;
+    }
+    if (markers.has(cursor)) blindForks.add(parent);
+    cursor = parent;
+  }
+  // A turn counts as taken back only where the fork it hangs off is visible
+  // right here: its parent sits on the path, or its parent was taken back
+  // already. Off the path is not enough on a byte window - the walk reaches
+  // no further than this window's lines, and a parent link can name a line
+  // further down the file, so everything it could not traverse would read as
+  // abandoned. The same rule keeps what predates a compact: that stretch has
+  // no parent on the live path either.
+  const retracted = new Set();
+  for (const uuid of order) {
+    if (chain.has(uuid)) continue;
+    const parent = parents.get(uuid);
+    if (parent == null) continue;
+    if (chain.has(parent)) {
+      // One request's tool calls arrive as a line each and their results
+      // come back in whatever order they finish, so the call that lost the
+      // race sits beside the path rather than on it. Same request, same
+      // turn - and both ids have to be real, or lines carrying none would
+      // excuse each other.
+      const request = requests.get(uuid);
+      if (request && request === requests.get(parent)) continue;
+      if (blindForks.has(parent)) continue;
+      retracted.add(uuid);
+    } else if (retracted.has(parent)) retracted.add(uuid);
+  }
+  // Where the walk stopped is what the next window needs. On a root there
+  // is nothing older left to judge. Out of parents: the missing one is where
+  // the next window carries on. Anchor never found: hand the same one back,
+  // since the window behind this one is where it most likely sits - nulling
+  // it would switch the filter off for the whole rest of the scrollback.
+  let chainAnchor = null;
+  if (!anchored) chainAnchor = anchor;
+  else if (segmentStart === null && cursor && !parents.has(cursor)) chainAnchor = cursor;
+  return { chain, retracted, segmentStart, chainAnchor, anchored };
+}
+
+// The roots, in file order. A null parent on a line with no uuid of its own
+// is not one - it has no identity to be a root with.
+export function segmentStarts(jsonlText) {
+  const starts = [];
+  for (const entry of entries(jsonlText)) {
+    if (typeof entry?.uuid === 'string' && entry.parentUuid == null) starts.push(entry.uuid);
+  }
+  return starts;
+}
+
+// Takes what `activeChain` returned, and drops only the turns it could
+// prove were taken back - a window whose fork point lies outside it keeps
+// them. Showing a turn that was taken back is the honest direction; hiding
+// real conversation is the failure this filter exists to prevent.
+export function markAbandoned(events, { retracted = new Set(), anchored = true }) {
+  // An anchor that is not in this text leaves nothing to judge against.
+  if (!anchored) return { events: [...events], abandoned: 0 };
+  const kept = [];
+  let abandoned = 0;
+  for (const event of events) {
+    if (event.uuid && retracted.has(event.uuid)) {
+      abandoned += 1;
+      continue;
+    }
+    kept.push(event);
+  }
+  return { events: kept, abandoned };
+}
+
+// Claude Code logs every queue move. enqueue and remove carry the text,
+// dequeue does not - it always takes the head.
+export function queueState(jsonlText) {
+  const waiting = [];
+  for (const entry of entries(jsonlText)) {
+    if (entry?.type !== 'queue-operation') continue;
+    const content = typeof entry.content === 'string' ? capText(entry.content, MAX_QUEUE_CHARS) : null;
+    if (entry.operation === 'enqueue') waiting.push({ content });
+    else if (entry.operation === 'dequeue') waiting.shift();
+    else if (entry.operation === 'popAll') waiting.length = 0;
+    else if (entry.operation === 'remove') {
+      // Nothing to remove means the enqueue is outside the text being read.
+      // Dropping the head instead would delete a message still waiting.
+      const at = waiting.findIndex((e) => e.content === content);
+      if (at !== -1) waiting.splice(at, 1);
+    }
+  }
+  return { waiting };
+}
+
+// `filtered: false` is for a window paged past the root of the live segment:
+// everything older is conversation, and walking the tree anyway would anchor
+// the next window's filter on this one's last uuid - a branch nobody asked
+// about.
+export function conversationView(jsonlText, { anchor = null, filtered = true } = {}) {
+  const all = conversationEvents(jsonlText);
+  const walk = filtered ? activeChain(jsonlText, { anchor }) : null;
+  const { events, abandoned } = walk ? markAbandoned(all, walk) : { events: all, abandoned: 0 };
+  return {
+    events: events.slice(-MAX_EVENTS),
+    abandoned,
+    segmentStarts: segmentStarts(jsonlText),
+    queue: queueState(jsonlText),
+    // Where the walk ended: the live segment's first turn, or null.
+    segmentStart: walk ? walk.segmentStart : null,
+    // For the next, older window: which uuid to anchor on, and whether the
+    // one just passed in was found. An unfiltered call hands its anchor back
+    // rather than dropping it.
+    chainAnchor: walk ? walk.chainAnchor : anchor,
+    anchored: walk ? walk.anchored : false,
+  };
 }
