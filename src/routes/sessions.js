@@ -26,12 +26,11 @@ import { readAgentBlocks } from '../lib/agentTranscript.js';
 import { readConversation } from '../lib/conversationReader.js';
 import { getTokenById, getAccountById, listAccounts } from '../lib/accountStore.js';
 import { writeSessionTokenFile, removeSessionTokenFile } from '../lib/sessionTokenFile.js';
+import { writeHookSettingsFile, removeHookSettingsFile } from '../lib/hookSettingsFile.js';
 import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
 
-// One stable settings file per session, holding the PermissionRequest hook
-// (see buildHookSettings). 0600 in a 0700 directory, because `claude` reads
-// it as the service user and nobody else has business in it - it names the
-// route that accepts this session's dialogs.
+// The settings file the session starts with (see buildHookSettings and
+// hookSettingsFile.js), plus the secret the hook authenticates with.
 //
 // The secret is derived from the session id, so a restart of this service
 // leaves a running session's hook working (see createPermissionStore).
@@ -40,14 +39,8 @@ import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
 function prepareHook(config, store, sessionId) {
   store.prepare(sessionId);
   const sessionSecret = store.secretFor(sessionId);
-  const hookSettingsPath = path.join(config.dataDir, 'hook-settings', `${sessionId}.json`);
-  const dir = path.dirname(hookSettingsPath);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  fs.chmodSync(dir, 0o700); // mkdirSync's mode does nothing to an existing directory
-  fs.writeFileSync(
-    hookSettingsPath,
-    JSON.stringify(buildHookSettings(config.port, sessionId)),
-    { mode: 0o600 },
+  const hookSettingsPath = writeHookSettingsFile(
+    config.dataDir, sessionId, buildHookSettings(config.port, sessionId),
   );
   return { sessionSecret, hookSettingsPath };
 }
@@ -303,19 +296,29 @@ export function sessionsRouter(config) {
   router.delete('/sessions/:id', async (req, res) => {
     const sessionId = req.params.id;
     if (!isValidSlug(sessionId)) return res.status(400).json({ error: 'Invalid session ID' });
+    // Via the carrier, because after a /clear the row with the end
+    // button carries the new Claude ID - no tmux session runs under
+    // that. Without this resolution, ending would report success
+    // without ending anything.
+    const carrier = tmuxSessionFor(config.dataDir, sessionId);
     try {
-      // Via the carrier, because after a /clear the row with the end
-      // button carries the new Claude ID - no tmux session runs under
-      // that. Without this resolution, ending would report success
-      // without ending anything.
-      await killSession(tmuxSessionFor(config.dataDir, sessionId));
-      res.status(204).end();
+      await killSession(carrier);
     } catch {
       // killSession throws if the session no longer exists. It may have
       // ended between display and click - then the goal is already
       // reached, and an error would be misleading.
-      res.status(204).end();
     }
+    // Outside the try, because a session that has already ended is the most
+    // common case of a leftover file. Both IDs: the file belongs to the ID
+    // the process was started with, which is the carrier - but prepareHook
+    // writes it before buildNewSessionArgs and before the meta writeback, so
+    // anything that throws in between (an invalid projectPath from a
+    // hand-edited projects.json, a crash of this service) leaves a file under
+    // the row's own ID with the carrier reference still pointing away.
+    for (const id of new Set([carrier, sessionId])) {
+      removeHookSettingsFile(config.dataDir, id);
+    }
+    res.status(204).end();
   });
 
   // Changes properties of a session. Merging instead of replacing:

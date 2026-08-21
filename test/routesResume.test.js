@@ -166,6 +166,74 @@ test('DELETE /api/sessions/:id ends the carrier session when the ID is from afte
   server.close();
 });
 
+// The settings file belongs to the ID the process was started with - the
+// carrier's, not the one the row shows after a /clear. A file under the row's
+// own ID exists whenever a resume got as far as writing one and then threw
+// before the meta writeback cleared the carrier reference. Both are
+// leftovers as soon as the row is ended.
+test('DELETE /api/sessions/:id removes the hook settings file of the carrier and of the row', async () => {
+  const config = tmpConfig();
+  const { setMeta } = await import('../src/lib/sessionMeta.js');
+  const { spawnTmux, waitForSession } = await import('../src/lib/tmuxManager.js');
+  const app = createApp(config);
+  const server = app.listen(0);
+  const { port } = server.address();
+
+  const carrier = crypto.randomUUID();
+  const afterClear = crypto.randomUUID();
+  const settingsFor = (id) => path.join(config.dataDir, 'hook-settings', `${id}.json`);
+  fs.mkdirSync(path.join(config.dataDir, 'hook-settings'), { recursive: true });
+  for (const id of [carrier, afterClear]) {
+    fs.writeFileSync(settingsFor(id), JSON.stringify({ hooks: {} }));
+  }
+  setMeta(config.dataDir, afterClear, { projectId: 'p1', tmuxSession: carrier });
+  spawnTmux(['new-session', '-d', '-s', carrier, 'sleep', '30']);
+  await waitForSession(carrier);
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${afterClear}`, { method: 'DELETE' });
+
+    assert.equal(res.status, 204);
+    assert.equal(fs.existsSync(settingsFor(carrier)), false, "the carrier's settings file was left behind");
+    assert.equal(fs.existsSync(settingsFor(afterClear)), false, "the row's own settings file was left behind");
+  } finally {
+    await killSessionEventually(carrier);
+    server.close();
+  }
+});
+
+// This is what makes removing the file safe at all, at startup as well as
+// on the end button: `claude` reads it once, at its own process start, and
+// every resume writes it again before starting one. A resume that reused an
+// existing file instead would silently depend on a file nobody keeps.
+test('POST /api/sessions/:id/resume writes the hook settings file again over a stale one', async () => {
+  const config = tmpConfig();
+  const account = addAccount(config.accountsSecretPath, 'private', VALID_TOKEN);
+  const project = tmpProject(config, 'hook-settings-resume');
+  const { port, close } = startApp(config);
+
+  const sessionId = crypto.randomUUID();
+  const settingsPath = path.join(config.dataDir, 'hook-settings', `${sessionId}.json`);
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { stale: true } }));
+  setMeta(config.dataDir, sessionId, { accountId: account.id, projectId: project.id });
+
+  try {
+    const res = await postJson(port, `/api/sessions/${sessionId}/resume`, {});
+
+    assert.equal(res.status, 200);
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    assert.equal(written.hooks.stale, undefined, 'the stale file was handed to the session');
+    assert.match(
+      written.hooks.PermissionRequest[0].hooks[0].url,
+      new RegExp(`/api/permission/${sessionId}$`),
+    );
+  } finally {
+    await killSessionEventually(sessionId);
+    close();
+  }
+});
+
 // Pre-existing sessions from the JSONL history were never started via
 // Claudux and therefore have no sessionMeta entry - if the route required
 // one, practically every session listed in the sidebar would fail with

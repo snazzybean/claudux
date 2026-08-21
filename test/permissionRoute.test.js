@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/server.js';
-import { setMeta } from '../src/lib/sessionMeta.js';
+import { setMeta, getMeta } from '../src/lib/sessionMeta.js';
 import {
   permissionHookRouter,
   permissionViewRouter,
@@ -22,9 +22,9 @@ const SESSION = '11111111-2222-3333-4444-555555555555';
 // The store derives its secrets from a key file, so every one of these needs
 // a directory of its own - a shared one would let one test's key decide
 // another test's secret.
-function tmpStore() {
+function tmpStore(options = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-permstore-'));
-  return { dataDir, store: createPermissionStore({ dataDir }) };
+  return { dataDir, store: createPermissionStore({ dataDir, ...options }) };
 }
 
 // Both routers on one app, in the order server.js mounts them - and with no
@@ -168,6 +168,49 @@ test('clear removes a held dialog', () => {
   store.put(SESSION, { toolName: 'Bash' });
   store.clear(SESSION);
   assert.equal(store.get(SESSION), null);
+});
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The handover the two halves of knowsSession make between them: the flag
+// carries an id from the spawn until its meta entry exists, and hands it over
+// there. Written out here rather than driven through createApp, because the
+// window is 30 s in production and only a store of the test's own can be
+// given a shorter one.
+test('knowsSession carries an id from the prepared flag over to its meta entry', async () => {
+  const { dataDir, store } = tmpStore({ preparedTtlMs: 100 });
+  const knows = (id) => store.isPrepared(id) || Boolean(getMeta(dataDir, id));
+  const starting = SESSION;
+  // Prepared, but its start never got as far as writing a meta entry.
+  const stranded = '22222222-2222-3333-4444-555555555555';
+  const never = '33333333-2222-3333-4444-555555555555';
+
+  assert.equal(knows(never), false, 'an id that never started is known by neither half');
+
+  store.prepare(starting);
+  store.prepare(stranded);
+  assert.equal(knows(starting), true, 'inside the window an id is known without a meta entry');
+
+  setMeta(dataDir, starting, { accountId: 'a', projectId: 'p' });
+  await sleep(200);
+
+  assert.equal(knows(starting), true, 'past the window the meta entry has to carry it');
+  assert.equal(knows(stranded), false, 'a start without a meta entry stops opening the hook route');
+  assert.equal(knows(never), false);
+});
+
+// The flag used to be a Set nothing ever removed from: one entry per session
+// ever started, for the life of the process.
+test('an expired prepared id is dropped rather than piling up', async () => {
+  const { store } = tmpStore({ preparedTtlMs: 100 });
+  store.prepare(SESSION);
+  store.prepare('22222222-2222-3333-4444-555555555555');
+  assert.equal(store.preparedCount(), 2);
+
+  await sleep(200);
+  store.prepare('33333333-2222-3333-4444-555555555555');
+
+  assert.equal(store.preparedCount(), 1, 'the two expired entries are still held');
 });
 
 // Deploying this project restarts the service, and KillMode=process leaves

@@ -204,6 +204,60 @@ test('DELETE /api/sessions/:id rejects invalid session IDs with 400', async () =
   }
 });
 
+// The settings file is only read by `claude` at its own process start, and
+// every start writes it fresh - so once the session it belonged to is
+// ended, nothing will ever read it again. Without this, one file per
+// session ID ever started piled up under the data directory.
+test('DELETE /api/sessions/:id removes the hook settings file of the session it ends', async () => {
+  const config = tmpConfig();
+  const { spawnTmux, waitForSession } = await import('../src/lib/tmuxManager.js');
+  const app = createApp(config);
+  const server = app.listen(0);
+  const { port } = server.address();
+
+  const name = crypto.randomUUID();
+  const settingsPath = path.join(config.dataDir, 'hook-settings', `${name}.json`);
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({ hooks: {} }));
+  spawnTmux(['new-session', '-d', '-s', name, 'sleep', '30']);
+  await waitForSession(name);
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${name}`, { method: 'DELETE' });
+
+    assert.equal(res.status, 204);
+    assert.equal(fs.existsSync(settingsPath), false, 'the settings file was left behind');
+  } finally {
+    await killSessionEventually(name);
+    server.close();
+  }
+});
+
+// The most common leftover: the session is already gone (crash, reaper,
+// exited in the terminal) and the end button is what gets rid of the row.
+// killSession throws on a session that no longer exists, so the removal
+// must not sit behind it.
+test('DELETE /api/sessions/:id removes the hook settings file of a session that already ended', async () => {
+  const config = tmpConfig();
+  const app = createApp(config);
+  const server = app.listen(0);
+  const { port } = server.address();
+
+  const name = crypto.randomUUID();
+  const settingsPath = path.join(config.dataDir, 'hook-settings', `${name}.json`);
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({ hooks: {} }));
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${name}`, { method: 'DELETE' });
+
+    assert.equal(res.status, 204);
+    assert.equal(fs.existsSync(settingsPath), false, 'the settings file was left behind');
+  } finally {
+    server.close();
+  }
+});
+
 // ---------- PATCH /api/sessions/:id ----------
 //
 // Two properties of a session that the user must be able to change:

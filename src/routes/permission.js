@@ -53,13 +53,26 @@ function installationKey(dataDir) {
   }
 }
 
+// How long a prepared id stays known. The flag only has to bridge the way
+// from the spawn to the session's meta entry - after that getMeta answers
+// for the id and the flag is redundant, which is why it expires instead of
+// staying. The interval it covers is bounded by waitForSession's own timeout
+// plus two tmux option calls, so this is wide enough for a badly loaded
+// container by a long way, while an id whose session is over stops opening
+// the hook route shortly after.
+const PREPARED_TTL_MS = 30_000;
+
 // The dialogs stay in memory: one must not outlive the process that was
 // asked, and a stale dialog on disk would draw a box for a session that has
 // long since moved on. Only the secret needs to survive a restart, and it
 // does so by being derivable rather than by being stored.
-export function createPermissionStore({ dataDir }) {
+export function createPermissionStore({ dataDir, preparedTtlMs = PREPARED_TTL_MS }) {
   const dialogs = new Map();
-  const prepared = new Set();
+  // Timestamps rather than a bare Set: an id nobody asks about again would
+  // otherwise stay for the life of the process - one per session ever
+  // started, each of them keeping the hook route open.
+  const prepared = new Map();
+  const expired = (at) => Date.now() - at > preparedTtlMs;
   return {
     put(id, dialog) { dialogs.set(id, dialog); },
     get(id) { return dialogs.get(id) ?? null; },
@@ -67,8 +80,25 @@ export function createPermissionStore({ dataDir }) {
     // Which sessions were started with a hook of their own. The session's
     // meta entry is only written after the spawn, so this is what closes the
     // window in between - see the knowsSession wiring in server.js.
-    prepare(id) { prepared.add(id); },
-    isPrepared(id) { return prepared.has(id); },
+    prepare(id) {
+      // Swept here rather than on a timer: this is the only place the map
+      // grows, so one pass per start bounds it by the sessions starting
+      // inside one window.
+      for (const [known, at] of prepared) {
+        if (expired(at)) prepared.delete(known);
+      }
+      prepared.set(id, Date.now());
+    },
+    isPrepared(id) {
+      const at = prepared.get(id);
+      if (at === undefined) return false;
+      if (!expired(at)) return true;
+      prepared.delete(id);
+      return false;
+    },
+    // Exported for the test that the map cannot outgrow one window's worth
+    // of starts - from outside there is nothing else to look at.
+    preparedCount() { return prepared.size; },
     secretFor(id) {
       return crypto.createHmac('sha256', installationKey(dataDir)).update(id).digest('hex');
     },

@@ -19,6 +19,7 @@ import { updateRouter } from './routes/update.js';
 import { cleanupOldModules } from './lib/updateRun.js';
 import { checkNoGlobalAuthOverride } from '../scripts/check-settings-guard.js';
 import { cleanupSessionTokenFiles } from './lib/sessionTokenFile.js';
+import { cleanupHookSettingsFiles } from './lib/hookSettingsFile.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import * as ttydManager from './lib/ttydManager.js';
 import { isAllowedUpgradeOrigin } from './lib/originGuard.js';
@@ -205,6 +206,11 @@ export function startServer(config = loadConfig()) {
   // Same reasoning for pasted screenshots: an upload only matters for the
   // paste that follows it.
   cleanupUploads();
+  // And for the hook settings files: every session started from here on
+  // writes its own. Not quite the same reasoning though - the sweep keeps a
+  // grace period for the session that was starting as this service
+  // restarted, see hookSettingsFile.js.
+  cleanupHookSettingsFiles(config.dataDir);
   // Left over from a completed update: the old modules stay in place while
   // the previous process is still using them (see updateRun.js).
   cleanupOldModules().catch(() => {});
