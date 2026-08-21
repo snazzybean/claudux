@@ -23,6 +23,7 @@ import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch, claudeSessionIdsF
 import { chooseTranscript } from '../lib/contextUsage.js';
 import { subagentsDirFor, AGENT_ID_RE } from '../lib/subagentWatcher.js';
 import { readAgentBlocks } from '../lib/agentTranscript.js';
+import { readConversation } from '../lib/conversationReader.js';
 import { getTokenById, getAccountById, listAccounts } from '../lib/accountStore.js';
 import { writeSessionTokenFile, removeSessionTokenFile } from '../lib/sessionTokenFile.js';
 import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
@@ -412,6 +413,52 @@ export function sessionsRouter(config) {
       }
       const after = Number.parseInt(req.query.after ?? '0', 10);
       res.json(readAgentBlocks(agentPath, Number.isFinite(after) && after > 0 ? after : 0));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // The conversation of the session itself. One of tail/after/before wins,
+  // in that order - mixing them has no meaning, and silently preferring one
+  // is friendlier than a 400 for a caller that sent two.
+  router.get('/sessions/:id/conversation', (req, res, next) => {
+    try {
+      const { id } = req.params;
+      if (!isValidSlug(id)) {
+        res.status(400).json({ error: 'Invalid session ID' });
+        return;
+      }
+      if (!getMeta(config.dataDir, id)) {
+        res.status(404).json({ error: 'Unknown session' });
+        return;
+      }
+      // Every id the carrier has run its conversation under, newest file
+      // wins: after a /clear the transcript sits under a new Claude session
+      // id while the tmux session keeps its name.
+      const transcript = chooseTranscript(config.claudeHome, claudeSessionIdsForTmux(config.dataDir, id));
+      if (!transcript || !fs.existsSync(transcript)) {
+        res.status(404).json({ error: 'No transcript for this session yet' });
+        return;
+      }
+      // Digits only, and not parseInt's numeric prefix: `1e9` would parse as
+      // byte 1, which is inside the first line - and the answer would be
+      // missing that line's turn. 15 of them stay a safe integer.
+      const number = (value) => (/^\d{1,15}$/.test(value ?? '') ? Number.parseInt(value, 10) : null);
+      // The uuid the previous window ended its walk on. No format check: it
+      // never reaches the filesystem, it is looked up in a map built from
+      // this file's own lines. It does come back out as `chainAnchor` though,
+      // so whatever renders that escapes it. A repeated query parameter
+      // arrives as an array, which is what the type test is for.
+      const anchor = typeof req.query.anchor === 'string' && req.query.anchor ? req.query.anchor : null;
+      const after = number(req.query.after);
+      const before = number(req.query.before);
+      if (req.query.tail === '1' || (after === null && before === null)) {
+        res.json(readConversation(transcript, { tail: true }));
+      } else if (after !== null) {
+        res.json(readConversation(transcript, { after }));
+      } else {
+        res.json(readConversation(transcript, { before, anchor }));
+      }
     } catch (err) {
       next(err);
     }
