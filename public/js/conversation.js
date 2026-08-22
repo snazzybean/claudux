@@ -15,6 +15,11 @@ import {
   conversationStopEl,
   conversationWorkingEl,
   conversationWorkingTextEl,
+  conversationAttachmentsEl,
+  conversationPreviewEl,
+  conversationPreviewImageEl,
+  conversationPreviewNameEl,
+  conversationPreviewCloseEl,
   conversationModeEl,
 } from './dom.js';
 import { checkResponse, showError, showToast } from './messages.js';
@@ -1458,7 +1463,11 @@ async function send() {
   // A second tap while the pane is being read would send the same text twice
   // and leave two cards that answer for one turn.
   if (sending) return;
-  const text = conversationInputEl.value;
+  // The one point where the text leaves this field, so the one place the
+  // placeholders become paths again. Everything downstream - the paste, the
+  // receipt's comparison, the queue, the slash-command test - sees exactly
+  // what it saw before this map existed.
+  const text = resolveAttachments(conversationInputEl.value);
   // Said rather than ignored: a field holding two rows of spaces does not look
   // empty, and the button next to it would otherwise be the one control here
   // that visibly does nothing. A toast and not the banner - nothing is wrong,
@@ -1536,6 +1545,7 @@ async function send() {
     entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
     state.pending.push(entry);
     conversationInputEl.value = '';
+    forgetAttachments();
     fitInput();
     // Sending is an act of returning to the end. Without this the view still
     // counts as having left it, and the tail read below - which is gated on
@@ -1581,6 +1591,88 @@ conversationInputEl.addEventListener('keydown', (event) => {
 // offer a file it will reject.
 const ATTACH_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
 
+// What is attached to the draft, by the placeholder standing in the field:
+// `[Image #1]` -> the path it becomes on the way out, plus a blob url for the
+// preview. The url comes from the file in hand rather than from a route -
+// nothing serves /tmp/claudux-uploads, and nothing needs to: the picture being
+// looked at is the one that was just picked.
+//
+// Claude Code reads an image from a PATH, so the path is what has to be sent.
+// The field showing 50 characters of it is what this map exists to avoid, and
+// resolveAttachments below puts it back exactly once, at the single point
+// where the text leaves this field.
+const attachments = new Map();
+let attachmentNo = 0;
+
+function forgetAttachments() {
+  for (const { url } of attachments.values()) URL.revokeObjectURL(url);
+  attachments.clear();
+  attachmentNo = 0;
+  renderAttachments();
+}
+
+// Only the ones still named in the text: deleting the placeholder by hand is
+// how someone takes an attachment back, and the chip has to go with it.
+function liveAttachments() {
+  const text = conversationInputEl.value;
+  return [...attachments.entries()].filter(([token]) => text.includes(token));
+}
+
+function resolveAttachments(text) {
+  let out = text;
+  for (const [token, { path }] of attachments) out = out.split(token).join(path);
+  return out;
+}
+
+function renderAttachments() {
+  const live = liveAttachments();
+  conversationAttachmentsEl.hidden = live.length === 0;
+  conversationAttachmentsEl.replaceChildren(...live.map(([token, item]) => {
+    const chip = document.createElement('span');
+    chip.className = 'conversation-chip';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'conversation-chip-open';
+    const thumb = document.createElement('img');
+    thumb.className = 'conversation-chip-thumb';
+    thumb.src = item.url;
+    thumb.alt = '';
+    open.append(thumb, document.createTextNode(token));
+    open.title = 'Show it before sending';
+    open.addEventListener('click', () => showPreview(item, token));
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'btn-quiet conversation-chip-drop';
+    drop.setAttribute('aria-label', `Remove ${token}`);
+    drop.title = `Remove ${token}`;
+    drop.append(svgNode('close', 'icon-symbol'));
+    drop.addEventListener('click', () => {
+      // The text is what holds the attachment; the map only explains it.
+      conversationInputEl.value = conversationInputEl.value.split(token).join('').replace(/[ \t]{2,}/g, ' ');
+      URL.revokeObjectURL(item.url);
+      attachments.delete(token);
+      fitInput();
+      renderAttachments();
+    });
+    chip.append(open, drop);
+    return chip;
+  }));
+}
+
+function showPreview(item, token) {
+  conversationPreviewImageEl.src = item.url;
+  conversationPreviewImageEl.alt = `${token}, before sending`;
+  conversationPreviewNameEl.textContent = token;
+  conversationPreviewEl.hidden = false;
+}
+
+conversationPreviewCloseEl.addEventListener('click', () => {
+  conversationPreviewEl.hidden = true;
+  // The src goes, not the url: the chip still needs it, and a picture left
+  // decoded behind a hidden panel is a picture held in memory for nothing.
+  conversationPreviewImageEl.removeAttribute('src');
+});
+
 // The same call the terminal's paste handler makes: the route takes the raw
 // image body with its own content type, not a form field.
 async function attachImage(file) {
@@ -1592,19 +1684,20 @@ async function attachImage(file) {
     });
     await checkResponse(res);
     const { path: uploadedPath } = await res.json();
-    // The path goes into the field as text, exactly what the paste handler
-    // does with it: Claude Code reads an image from a path, and an attachment
-    // is part of the message being written rather than a message of its own.
+    attachmentNo += 1;
+    const token = `[Image #${attachmentNo}]`;
+    attachments.set(token, { path: uploadedPath, url: URL.createObjectURL(file) });
     const value = conversationInputEl.value;
     const start = conversationInputEl.selectionStart ?? value.length;
     const end = conversationInputEl.selectionEnd ?? start;
-    const insert = `${uploadedPath} `;
+    const insert = `${token} `;
     conversationInputEl.value = `${value.slice(0, start)}${insert}${value.slice(end)}`;
     conversationInputEl.focus();
     conversationInputEl.setSelectionRange(start + insert.length, start + insert.length);
     // Assigning `value` fires no input event, so the field would keep the
-    // height of the shorter text.
+    // height of the shorter text - and the chip would not know it exists.
     fitInput();
+    renderAttachments();
   } catch (err) {
     showError(`Image upload failed: ${err.message}`);
   }
@@ -1618,6 +1711,11 @@ async function attachImage(file) {
 // No capture phase and no iframe, unlike the terminal's own handler: this
 // textarea is in this document and nothing else claims its paste. Text is not
 // touched at all - the field pastes that itself.
+// A placeholder deleted by hand takes its chip with it (see liveAttachments).
+conversationInputEl.addEventListener('input', () => {
+  if (attachments.size) renderAttachments();
+});
+
 conversationInputEl.addEventListener('paste', (event) => {
   const item = Array.from(event.clipboardData?.items ?? [])
     .find((entry) => entry.type.startsWith('image/'));

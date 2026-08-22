@@ -3930,6 +3930,10 @@ button { cursor: pointer; }
    this view's keyboard, so the composer sits above it rather than in its
    place. */
 .conversation-panel {
+  /* The preview covers this panel (.conversation-preview), which needs a
+     containing block here. Nothing else inside is positioned, so this adds
+     one rather than moving one. */
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -4385,6 +4389,99 @@ button { cursor: pointer; }
 /* Its own `display: flex` beats the UA's `[hidden]` rule, same as the panel
    above - and this one is hidden whenever there is no session to answer. */
 .conversation-composer[hidden] { display: none; }
+/* The attachments of the draft, on a line of their own above the field and
+   only there while something is attached - so it costs the stream nothing the
+   rest of the time. Wraps rather than scrolling: three of these are already
+   more than anyone attaches to one message. */
+.conversation-attachments {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+.conversation-attachments[hidden] { display: none; }
+.conversation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 3px 4px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: var(--fs-ui);
+}
+/* The thumbnail and the placeholder are one target: the whole point of the
+   chip is that it can be looked at before it goes out. */
+.conversation-chip-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.conversation-chip-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  /* A wide picture must not stretch the chip while it is still decoding. */
+  background: var(--surface);
+}
+.conversation-chip-drop {
+  width: 20px;
+  height: 20px;
+}
+.conversation-chip-drop:hover { color: var(--danger); }
+
+/* The preview, over the panel. Same shape as .copy-text-panel over the
+   terminal, and for the same reason: a <dialog> centres itself against the
+   layout viewport and would sit under the on-screen keyboard. */
+.conversation-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.conversation-preview[hidden] { display: none; }
+.conversation-preview-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.conversation-preview-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+}
+.conversation-preview-close {
+  width: 28px;
+  height: 28px;
+}
+/* Fits rather than fills: a screenshot from a phone is taller than this box,
+   and cropping the one thing being looked at would defeat the point. */
+.conversation-preview-image {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: 100%;
+  object-fit: contain;
+}
 .conversation-input {
   /* The basis is what decides the wrap above - below this the controls move
      to a line of their own instead of taking the width from the field. */
