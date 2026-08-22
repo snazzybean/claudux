@@ -4,8 +4,9 @@
   <meta charset="utf-8" />
   <!-- `interactive-widget=resizes-content` shrinks the layout viewport along
        with the keyboard, so there's nothing left to pan the visible area
-       around in. Unknown values are ignored - the touchmove guard in app.js
-       covers those browsers. -->
+       around in - where it is honoured. iOS Safari ignores it and pans
+       anyway; js/viewport.js follows that offset. Unknown values are ignored
+       - the touchmove guard there covers those browsers. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
   <title>Claudux</title>
   <link rel="stylesheet" href="/styles.css" />
@@ -258,7 +259,7 @@
                edge: as `position: fixed` at the bottom of the screen it
                used to sit under the on-screen keyboard on the phone and was
                never visible (the same trap that --app-height solves for
-               the terminal and keyboard bar, see app.js). .terminal-wrap
+               the terminal and keyboard bar, see js/viewport.js). .terminal-wrap
                follows the visible height along with it. -->
           <div class="toast" id="toast" role="status" aria-live="polite"></div>
         </div>

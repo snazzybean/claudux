@@ -22,10 +22,27 @@
 // Without this interface (older browsers) it falls back to the CSS
 // fallback of 100dvh - there the adjustment is only as good as the
 // browser provides on its own.
-function fitHeightToVisibleArea() {
+// ---------- Offset of the visible area ----------
+//
+// The height alone leaves the app off the screen: on focus iOS pans the
+// visible area down over the layout viewport, which keeps its full height,
+// while the app stays anchored at its top. What is left on screen is the few
+// pixels the pan happens to spare. `interactive-widget=resizes-content` in
+// index.html would take away the reason to pan; iOS Safari ignores it.
+//
+// A top margin, and three things make it the right one. It does not collapse
+// through `body` - `overflow: hidden` there establishes a block formatting
+// context, without which it would move nothing at all. It cannot overflow:
+// `offsetTop + height` is at most the layout viewport's height by definition,
+// so the app never reaches past the bottom edge at any point in the
+// keyboard's animation. And not a transform: `.agent-window` is
+// `position: fixed` and placed from measured window coordinates, which a
+// transformed ancestor would silently reinterpret.
+function followVisibleArea() {
   const vv = window.visualViewport;
   if (!vv) return;
   document.documentElement.style.setProperty('--app-height', `${vv.height}px`);
+  document.documentElement.style.setProperty('--app-offset', `${vv.offsetTop}px`);
 }
 
 // ---------- Dragging the app off the screen ----------
@@ -85,12 +102,26 @@ function showViewportMeasurement() {
     if (history.length > DEBUG_HISTORY_LENGTH) history.shift();
   });
 
+  // Peak-hold, because the overlay cannot be read while the fault is
+  // happening: an offset visible viewport takes this box off the screen along
+  // with the rest of the app. The worst value stays up until the page is
+  // reloaded, so it can be read once the keyboard is down again.
+  const peak = { offsetTop: 0, scale: 1, height: null, at: null, scrollY: 0, docTop: 0 };
+
   setInterval(() => {
     const vv = window.visualViewport;
     const raw = getComputedStyle(document.documentElement).getPropertyValue('--app-height');
     const set = raw ? parseFloat(raw) : null;
     const now = vv ? vv.height : null;
     const deviation = now !== null && set !== null ? Math.round(now - set) : null;
+    if (vv && (vv.offsetTop > peak.offsetTop || vv.scale > peak.scale)) {
+      peak.offsetTop = Math.max(peak.offsetTop, vv.offsetTop);
+      peak.scale = Math.max(peak.scale, vv.scale);
+      peak.height = vv.height;
+      peak.at = document.activeElement?.className || document.activeElement?.tagName || '?';
+      peak.scrollY = window.scrollY;
+      peak.docTop = document.scrollingElement?.scrollTop ?? -1;
+    }
     box.textContent = [
       `vv.height     ${now !== null ? now.toFixed(1) : 'no interface'}`,
       `--app-height  ${set !== null ? set.toFixed(1) : 'never set'}`,
@@ -98,21 +129,30 @@ function showViewportMeasurement() {
       `resize        ${resizeCounter}x, last ${((Date.now() - lastResize) / 1000).toFixed(1)}s ago`,
       `last reported ${history.join(' → ') || '-'}`,
       `innerHeight   ${window.innerHeight}`,
+      // Pan and zoom look the same to the eye - the app slides off the
+      // screen either way - and the fix for one is not the fix for the other.
       `vv.offsetTop  ${vv ? vv.offsetTop.toFixed(1) : '-'}`,
+      `vv.scale      ${vv ? vv.scale.toFixed(3) : '-'}`,
+      `vv.width      ${vv ? vv.width.toFixed(1) : '-'}`,
       `scrollY       ${window.scrollY.toFixed(1)}`,
       `keybar.bottom ${keybar ? keybar.getBoundingClientRect().bottom.toFixed(1) : '-'}`,
+      `PEAK offset   ${peak.offsetTop.toFixed(1)}  scale ${peak.scale.toFixed(3)}`,
+      `PEAK vv.h     ${peak.height === null ? '-' : peak.height.toFixed(1)}`,
+      `PEAK focus    ${peak.at ?? '-'}`,
+      `PEAK scrollY  ${peak.scrollY.toFixed(1)}  docTop ${peak.docTop.toFixed(1)}`,
+      `app.top       ${document.getElementById('app')?.getBoundingClientRect().top.toFixed(1) ?? '-'}`,
     ].join('\n');
   }, DEBUG_TICK_MS);
 }
 
 export function initViewport() {
   if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', fitHeightToVisibleArea);
+    window.visualViewport.addEventListener('resize', followVisibleArea);
     // When scrolling with the keyboard open, iOS shifts the visible area
     // without changing its height - the call is then a no-op, but keeps the
     // value correct when both happen together.
-    window.visualViewport.addEventListener('scroll', fitHeightToVisibleArea);
-    fitHeightToVisibleArea();
+    window.visualViewport.addEventListener('scroll', followVisibleArea);
+    followVisibleArea();
   }
 
   document.addEventListener(

@@ -634,6 +634,9 @@ button { cursor: pointer; }
   display: flex;
   flex-direction: column;
   height: var(--app-height, 100dvh);
+  /* Follows the visible area's offset as well as its height - iOS pans it
+     away from the layout viewport's top edge, see js/viewport.js. */
+  margin-top: var(--app-offset, 0);
 }
 
 /* Pushes the group to the right edge. On the back button itself rather
