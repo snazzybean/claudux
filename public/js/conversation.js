@@ -1610,6 +1610,24 @@ async function attachImage(file) {
   }
 }
 
+// An image from the clipboard, straight into the field. Same route as the
+// button above, because Claude Code works with a path and not with image data
+// - and the keybar's paste button is no help here: it pastes into the
+// TERMINAL's input line, which is not where this message is being written.
+//
+// No capture phase and no iframe, unlike the terminal's own handler: this
+// textarea is in this document and nothing else claims its paste. Text is not
+// touched at all - the field pastes that itself.
+conversationInputEl.addEventListener('paste', (event) => {
+  const item = Array.from(event.clipboardData?.items ?? [])
+    .find((entry) => entry.type.startsWith('image/'));
+  if (!item) return;
+  const file = item.getAsFile();
+  if (!file) return;
+  event.preventDefault();
+  attachImage(file);
+});
+
 conversationAttachEl.addEventListener('click', () => {
   const picker = document.createElement('input');
   picker.type = 'file';

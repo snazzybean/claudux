@@ -2357,7 +2357,18 @@ button { cursor: pointer; }
 
 @media (max-width: 720px) {
   .keybar { display: flex; }
-  .app[data-tab="files"] .keybar { display: none; }
+  /* Not on the other two tabs. Every key on it is aimed at the terminal - an
+     interrupt, the mode switch, page keys and arrows for a scrollback this
+     view does not have, a paste into the terminal's input line and a copy of
+     its buffer - and the conversation view carries its own control for each
+     one it still needs: Stop, the mode badge, its own scrolling, and a paste
+     that lands in the composer. Hiding it also hands its height back to the
+     stream, which is the tightest budget on a phone (see .conversation-input).
+
+     This reverses a deliberate decision from when the view had none of those
+     controls yet. */
+  .app[data-tab="files"] .keybar,
+  .app[data-tab="conversation"] .keybar { display: none; }
 }
 .keybar button {
   font-family: var(--font-mono);

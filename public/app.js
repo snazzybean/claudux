@@ -1563,9 +1563,9 @@ function dropConversationSession() {
 // hidden, never unloaded - window.term has to survive, because this view
 // sends its input back out through it.
 //
-// The keybar is deliberately NOT hidden here (unlike on the files tab): it
-// is this view's keyboard, and the composer sits above it rather than in its
-// place.
+// The keybar goes with the terminal, same as on the files tab (the rule is in
+// styles.css): every key on it is aimed at the terminal, and this view has
+// grown its own control for each one it still needs.
 function activateConversationTab() {
   tabTerminalEl.dataset.active = 'false';
   tabFilesEl.dataset.active = 'false';
