@@ -1962,6 +1962,47 @@ function renderStop(state) {
 // The transcript stays as the fallback for the moment before the first pane
 // read of a session has landed; after that the pane always answers, including
 // "manual" for the mode that draws no line of its own.
+// A series of looks after the keystroke, not one: Claude Code redraws its
+// status bar a moment after the Shift+Tab, so a single read fired at once sees
+// the mode it just left and nothing looks again until the poll's own tick -
+// which is what made the badge take up to five seconds to follow a tap. Same
+// shape as DIALOG_RESIZE_LOOKS_MS below, and for the same kind of reason.
+//
+// One fetch each and only the mode taken from it: refreshDialog reads the hook
+// beside the pane and carries a lock that would drop a call made while it is
+// already running.
+const MODE_LOOKS_MS = [120, 320, 700, 1500];
+let modeLooks = [];
+
+async function lookForMode(carrier, state, before) {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/pane`);
+    if (!res.ok) return false;
+    const pane = await res.json();
+    if (!('mode' in pane) || !sameView(carrier, state)) return false;
+    if (pane.mode === before) return false;
+    state.paneMode = pane.mode;
+    renderMode(state);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The looks stand down as soon as one of them sees a different mode - and the
+// series is cleared when a new tap starts one, so two taps in a row do not
+// leave the first tap's looks racing the second's.
+function watchForModeChange(carrier, state) {
+  for (const look of modeLooks) clearTimeout(look);
+  const before = state?.paneMode ?? null;
+  modeLooks = MODE_LOOKS_MS.map((ms) => setTimeout(async () => {
+    if (await lookForMode(carrier, state, before)) {
+      for (const look of modeLooks) clearTimeout(look);
+      modeLooks = [];
+    }
+  }, ms));
+}
+
 function renderMode(state) {
   const mode = state?.paneMode ?? state?.permissionMode ?? null;
   conversationModeEl.hidden = !mode || Boolean(state?.gone);
@@ -2130,10 +2171,8 @@ conversationModeEl.addEventListener('click', () => {
     showError('The terminal is not ready yet - open the terminal tab once, then try again.');
     return;
   }
-  // Straight away rather than on the next tick: the pane redraws its status bar
-  // in milliseconds, and a badge that takes up to five seconds to follow a tap
-  // is the thing this stopped being.
-  refreshDialog().catch(() => {});
+  const carrier = carrierOf(session);
+  if (carrier) watchForModeChange(carrier, state ?? stateFor(carrier));
 });
 
 // ---------- the card that answers an open box ----------
