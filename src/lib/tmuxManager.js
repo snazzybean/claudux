@@ -57,7 +57,7 @@ export const SESSION_WRAPPER_PATH = fileURLToPath(new URL('../../scripts/claude-
 // (see sessionTokenFile.js). A real wrapper script rather than a
 // `sh -c "…"` string, so every value stays its own argv element.
 export function buildNewSessionArgs({
-  sessionId, projectPath, tokenFilePath, resume, hookSettingsPath, sessionSecret,
+  sessionId, projectPath, tokenFilePath, resume, hookSettingsPath, sessionSecretPath,
 }) {
   if (!isValidSlug(sessionId)) {
     throw new Error(`Invalid sessionId: ${sessionId}`);
@@ -74,19 +74,21 @@ export function buildNewSessionArgs({
     '-c', projectPath,
     SESSION_WRAPPER_PATH, tokenFilePath,
   ];
-  // The hook's secret takes the same path as the token: its own argv
-  // element, never a shell line, and the wrapper moves it into the
-  // environment before `claude` runs. Unlike the token it IS the secret and
-  // not a path to one, which is why it is good for nothing but
-  // POST /api/permission/<this session>. Derived from an installation key
-  // rather than drawn here, so that a running session's hook survives a
-  // restart of this service (see createPermissionStore).
+  // The hook's secret takes the same route as the token, down to the file:
+  // what stands here is a PATH to a 0600 file, the wrapper reads it into the
+  // environment and unlinks it before `claude` runs. The secret itself in
+  // this slot would be world-readable for days - tmux keeps the whole start
+  // command in `pane_start_command` for the life of the pane, and the tmux
+  // server's own /proc/<pid>/cmdline keeps the argv of whichever session
+  // started it. Derived from an installation key rather than drawn here, so
+  // that a running session's hook survives a restart of this service (see
+  // createPermissionStore).
   //
   // The slot is always emitted, `-` meaning "this session has none": the
   // wrapper reads it by position, and a conditional slot would have it shift
   // away claude's first option instead - with --session-id that leaves the
   // session out of the sidebar entirely (see below).
-  args.push(sessionSecret || '-');
+  args.push(sessionSecretPath || '-');
   if (hookSettingsPath) args.push('--settings', hookSettingsPath);
   if (resume) {
     args.push('--resume', sessionId);
@@ -100,35 +102,6 @@ export function buildNewSessionArgs({
     args.push('--session-id', sessionId);
   }
   return args;
-}
-
-// The hook that tells Claudux a session is asking something. A START
-// OPTION rather than configuration: it travels in --settings on the command
-// line, so nothing in ~/.claude is touched and nobody has to configure
-// anything - and hooks given this way add to whatever hooks already exist
-// instead of replacing them.
-export function buildHookSettings(port, sessionId) {
-  return {
-    hooks: {
-      PermissionRequest: [
-        {
-          hooks: [
-            {
-              type: 'http',
-              url: `http://127.0.0.1:${port}/api/permission/${sessionId}`,
-              // The secret comes from the environment, not from this file:
-              // the file is written by the server and read by claude, and a
-              // literal here would put it on disk for as long as the session
-              // lives.
-              headers: { 'x-claudux-session-secret': '$CLAUDUX_SESSION_SECRET' },
-              allowedEnvVars: ['CLAUDUX_SESSION_SECRET'],
-              timeout: 30,
-            },
-          ],
-        },
-      ],
-    },
-  };
 }
 
 // Printed by THIS shell command, not by `claude setup-token` itself - and

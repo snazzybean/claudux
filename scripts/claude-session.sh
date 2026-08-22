@@ -17,19 +17,28 @@ tokenfile="$1"
 shift
 
 # The per-session secret the PermissionRequest hook proves itself with. Same
-# reasoning as the token above: it arrives as an argv element and moves into
-# the environment, because /proc/<pid>/cmdline is world-readable while the
-# environment is not.
+# handover as the token above and for the same reason: a FILE, whose path is
+# what stands in argv. tmux keeps the start command for the life of the pane
+# and /proc/<pid>/cmdline is world-readable, so the secret itself in this slot
+# would be readable by every local account for days.
 #
 # The slot is always present, so it can never swallow one of claude's own
 # options; `-` means this session runs without hooks. The guard around it is
 # for callers that pass nothing but the token file - under `set -u` a bare
 # `$1` would abort, and `[ … ] && shift` as a statement would abort under
 # `set -e` on the false branch.
+#
+# A missing or unreadable secret file is NOT fatal, unlike the token below: a
+# session without a hook runs perfectly well, it just has no card in the
+# conversation view - while refusing to start would turn a cosmetic loss into
+# no session at all. The file goes either way; nothing else reads it.
 if [ $# -gt 0 ]; then
   if [ "$1" != "-" ]; then
-    CLAUDUX_SESSION_SECRET="$1"
-    export CLAUDUX_SESSION_SECRET
+    if [ -r "$1" ]; then
+      CLAUDUX_SESSION_SECRET="$(cat "$1")"
+      export CLAUDUX_SESSION_SECRET
+    fi
+    rm -f "$1"
   fi
   shift
 fi

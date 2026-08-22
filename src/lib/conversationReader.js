@@ -15,6 +15,14 @@ import { subagentsDirFor } from './subagentWatcher.js';
 // windows are disjoint byte ranges, so an event that cap cuts from one is in
 // no other window either. Above roughly 800 KB that starts happening, and
 // nothing on the wire would say so.
+//
+// Only the poll's client guards against it (a capped window restarts the
+// view). The other two reads cannot: `from` is the START of the window, and
+// the cap drops the OLDEST events in it, so the byte range of what was
+// dropped has no name on the wire - a `before` read from `from` starts older
+// than them and they are never fetched again. Raising this value is
+// therefore not a free change: it would first have to give the response a
+// mark for "this window was cut".
 export const TAIL_BYTES = 512 * 1024;
 
 // The file name IS the Claude session id, and a /clear starts a new file.
@@ -158,7 +166,6 @@ export function readConversation(filePath, {
   return {
     events: view.events,
     abandoned: view.abandoned,
-    segmentStarts: view.segmentStarts,
     segmentStart: view.segmentStart,
     // From the walk, never from the events: the oldest chain member is
     // regularly a `system` or `attachment` line that produces none. A window

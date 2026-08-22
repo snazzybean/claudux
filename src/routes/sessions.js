@@ -5,7 +5,6 @@ import crypto from 'node:crypto';
 import { loadProjects } from '../lib/projectStore.js';
 import {
   buildNewSessionArgs,
-  buildHookSettings,
   spawnTmux,
   isValidSlug,
   hasSession,
@@ -26,8 +25,13 @@ import { subagentsDirFor, AGENT_ID_RE } from '../lib/subagentWatcher.js';
 import { readAgentBlocks } from '../lib/agentTranscript.js';
 import { readConversation } from '../lib/conversationReader.js';
 import { getTokenById, getAccountById, listAccounts } from '../lib/accountStore.js';
-import { writeSessionTokenFile, removeSessionTokenFile } from '../lib/sessionTokenFile.js';
-import { writeHookSettingsFile, removeHookSettingsFile } from '../lib/hookSettingsFile.js';
+import {
+  writeSessionTokenFile,
+  removeSessionTokenFile,
+  writeSessionSecretFile,
+  removeSessionSecretFile,
+} from '../lib/sessionTokenFile.js';
+import { buildHookSettings, writeHookSettingsFile, removeHookSettingsFile } from '../lib/hookSettingsFile.js';
 import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
 
 // The settings file the session starts with (see buildHookSettings and
@@ -37,13 +41,21 @@ import { ensureOnboardingCompleted } from '../lib/onboardingFlag.js';
 // leaves a running session's hook working (see createPermissionStore).
 // Registering the id is what lets the route accept a hook that fires before
 // the session's meta entry is written.
+//
+// It travels the way the account token travels - a 0600 file whose path is
+// in argv, unlinked by the wrapper the moment it has been read. Both of the
+// other channels are worse: argv is world-readable and tmux keeps it for the
+// life of the pane, and a literal in the settings file would put the secret
+// on disk for as long as the session lives.
 function prepareHook(config, store, sessionId) {
   store.prepare(sessionId);
-  const sessionSecret = store.secretFor(sessionId);
+  const sessionSecretPath = writeSessionSecretFile(
+    config.dataDir, sessionId, store.secretFor(sessionId),
+  );
   const hookSettingsPath = writeHookSettingsFile(
     config.dataDir, sessionId, buildHookSettings(config.port, sessionId),
   );
-  return { sessionSecret, hookSettingsPath };
+  return { sessionSecretPath, hookSettingsPath };
 }
 
 export function sessionsRouter(config) {
@@ -67,10 +79,10 @@ export function sessionsRouter(config) {
       // Before the pane starts, not after: `claude` reads onboarding state
       // at its own startup, right after this call.
       ensureOnboardingCompleted();
-      const { sessionSecret, hookSettingsPath } = prepareHook(config, req.app.locals.permissionStore, sessionId);
+      const { sessionSecretPath, hookSettingsPath } = prepareHook(config, req.app.locals.permissionStore, sessionId);
       const args = buildNewSessionArgs({
         sessionId, projectPath: project.path, tokenFilePath, resume: false,
-        hookSettingsPath, sessionSecret,
+        hookSettingsPath, sessionSecretPath,
       });
       spawnTmux(args);
       // Only respond once the session actually exists - otherwise the
@@ -78,11 +90,14 @@ export function sessionsRouter(config) {
       // done.
       const started = await waitForSession(sessionId);
       // Only clean up on failure. waitForSession returns as soon as the
-      // session EXISTS - not once the wrapper has read the token. An
-      // unconditional delete would pull the file out from under it. On
-      // success the wrapper deletes it itself; whatever's left is picked
-      // up by cleanupSessionTokenFiles() on the next startup.
-      if (!started) removeSessionTokenFile(config.dataDir, sessionId);
+      // session EXISTS - not once the wrapper has read the two handoff
+      // files. An unconditional delete would pull them out from under it. On
+      // success the wrapper deletes them itself; whatever's left is picked
+      // up by the cleanups on the next startup.
+      if (!started) {
+        removeSessionTokenFile(config.dataDir, sessionId);
+        removeSessionSecretFile(config.dataDir, sessionId);
+      }
       // Must run AFTER waitForSession, otherwise `set-option` addresses a
       // session that doesn't exist yet.
       await disableStatusBar(sessionId);
@@ -249,16 +264,19 @@ export function sessionsRouter(config) {
       // Only here, not in the three branches above that reuse a RUNNING
       // session: those start no process, so there is nothing to hand a
       // settings file to - and the process they reuse already has one.
-      const { sessionSecret, hookSettingsPath } = prepareHook(config, req.app.locals.permissionStore, sessionId);
+      const { sessionSecretPath, hookSettingsPath } = prepareHook(config, req.app.locals.permissionStore, sessionId);
       const args = buildNewSessionArgs({
         sessionId, projectPath: project.path, tokenFilePath, resume: true,
-        hookSettingsPath, sessionSecret,
+        hookSettingsPath, sessionSecretPath,
       });
       spawnTmux(args);
       const started = await waitForSession(sessionId);
       // Only on failure - otherwise a race with the wrapper, see the
       // create route.
-      if (!started) removeSessionTokenFile(config.dataDir, sessionId);
+      if (!started) {
+        removeSessionTokenFile(config.dataDir, sessionId);
+        removeSessionSecretFile(config.dataDir, sessionId);
+      }
       await disableStatusBar(sessionId);
       // Same placement and reasoning as the create route above.
       await setRemainOnExit(sessionId);
@@ -316,8 +334,14 @@ export function sessionsRouter(config) {
     // anything that throws in between (an invalid projectPath from a
     // hand-edited projects.json, a crash of this service) leaves a file under
     // the row's own ID with the carrier reference still pointing away.
+    // The dialog goes with the file, for the same reason and under the same
+    // two ids: it is the other piece of per-session state the hook leaves
+    // behind, and a session that has been ended has no box standing for it to
+    // describe. Held in memory, so nothing but this and the status watcher
+    // ever takes one out.
     for (const id of new Set([carrier, sessionId])) {
       removeHookSettingsFile(config.dataDir, id);
+      req.app.locals.permissionStore.clear(id);
     }
     res.status(204).end();
   });

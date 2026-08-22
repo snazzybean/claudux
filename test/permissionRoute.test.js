@@ -10,12 +10,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/server.js';
-import { setMeta, getMeta } from '../src/lib/sessionMeta.js';
 import {
   permissionHookRouter,
   permissionViewRouter,
-  createPermissionStore,
 } from '../src/routes/permission.js';
+import { setMeta } from '../src/lib/sessionMeta.js';
+import { createPermissionStore } from '../src/lib/permissionStore.js';
 
 const SESSION = '11111111-2222-3333-4444-555555555555';
 
@@ -134,11 +134,22 @@ test('a secret of the wrong length is refused, not answered with an error', asyn
   assert.equal(res.status, 403);
 });
 
-test('an unknown session is refused before the secret is even compared', async () => {
+// One answer for every refusal. This route sits in front of the access gate
+// on an instance reachable from the internet: a 404 for an unknown id beside
+// a 403 for a known one would let anyone enumerate valid session ids without
+// ever holding a secret.
+test('an unknown session is refused with the same answer as a wrong secret', async () => {
   const { store } = tmpStore();
   const other = '99999999-2222-3333-4444-555555555555';
-  const res = await post(appWith(store), `/api/permission/${other}`, { tool_name: 'Bash' }, { 'x-claudux-session-secret': store.secretFor(other) });
-  assert.equal(res.status, 404);
+  const unknown = await post(appWith(store), `/api/permission/${other}`, { tool_name: 'Bash' }, { 'x-claudux-session-secret': store.secretFor(other) });
+  const wrongSecret = await post(appWith(store), `/api/permission/${SESSION}`, { tool_name: 'Bash' }, { 'x-claudux-session-secret': 'falsch' });
+  assert.equal(unknown.status, 403);
+  assert.deepEqual(unknown.body, wrongSecret.body);
+
+  // And an id that is not a session id at all answers the same way rather
+  // than reaching the lookup.
+  const nonsense = await post(appWith(store), '/api/permission/..%2F..%2Fetc', { tool_name: 'Bash' });
+  assert.equal(nonsense.status, 403);
 });
 
 test('the view reads the held dialog and can drop it', async () => {
@@ -161,79 +172,6 @@ test('the view refuses an unknown session on both of its verbs', async () => {
   const other = '/api/permission/99999999-2222-3333-4444-555555555555';
   assert.equal((await request(app, 'GET', other)).status, 404);
   assert.equal((await request(app, 'DELETE', other)).status, 404);
-});
-
-test('clear removes a held dialog', () => {
-  const { store } = tmpStore();
-  store.put(SESSION, { toolName: 'Bash' });
-  store.clear(SESSION);
-  assert.equal(store.get(SESSION), null);
-});
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// The handover the two halves of knowsSession make between them: the flag
-// carries an id from the spawn until its meta entry exists, and hands it over
-// there. Written out here rather than driven through createApp, because the
-// window is 30 s in production and only a store of the test's own can be
-// given a shorter one.
-test('knowsSession carries an id from the prepared flag over to its meta entry', async () => {
-  const { dataDir, store } = tmpStore({ preparedTtlMs: 100 });
-  const knows = (id) => store.isPrepared(id) || Boolean(getMeta(dataDir, id));
-  const starting = SESSION;
-  // Prepared, but its start never got as far as writing a meta entry.
-  const stranded = '22222222-2222-3333-4444-555555555555';
-  const never = '33333333-2222-3333-4444-555555555555';
-
-  assert.equal(knows(never), false, 'an id that never started is known by neither half');
-
-  store.prepare(starting);
-  store.prepare(stranded);
-  assert.equal(knows(starting), true, 'inside the window an id is known without a meta entry');
-
-  setMeta(dataDir, starting, { accountId: 'a', projectId: 'p' });
-  await sleep(200);
-
-  assert.equal(knows(starting), true, 'past the window the meta entry has to carry it');
-  assert.equal(knows(stranded), false, 'a start without a meta entry stops opening the hook route');
-  assert.equal(knows(never), false);
-});
-
-// The flag used to be a Set nothing ever removed from: one entry per session
-// ever started, for the life of the process.
-test('an expired prepared id is dropped rather than piling up', async () => {
-  const { store } = tmpStore({ preparedTtlMs: 100 });
-  store.prepare(SESSION);
-  store.prepare('22222222-2222-3333-4444-555555555555');
-  assert.equal(store.preparedCount(), 2);
-
-  await sleep(200);
-  store.prepare('33333333-2222-3333-4444-555555555555');
-
-  assert.equal(store.preparedCount(), 1, 'the two expired entries are still held');
-});
-
-// Deploying this project restarts the service, and KillMode=process leaves
-// every `claude` running with the secret it was started with. A secret held
-// in memory would be gone while those sessions keep sending theirs, and
-// every dialog they report would be refused for the rest of their lives -
-// invisibly, since the terminal keeps its own box either way.
-test('a new store over the same data directory derives the same secret', () => {
-  const { dataDir, store } = tmpStore();
-  const before = store.secretFor(SESSION);
-  assert.match(before, /^[0-9a-f]{64}$/);
-  const afterRestart = createPermissionStore({ dataDir }).secretFor(SESSION);
-  assert.equal(afterRestart, before);
-});
-
-test('the secret differs per session and per installation', () => {
-  const { dataDir, store } = tmpStore();
-  assert.notEqual(store.secretFor(SESSION), store.secretFor('22222222-2222-3333-4444-555555555555'));
-  const elsewhere = tmpStore().store.secretFor(SESSION);
-  assert.notEqual(elsewhere, store.secretFor(SESSION));
-  // The key, not the derived value, is what has to stay unreadable.
-  const mode = fs.statSync(path.join(dataDir, 'permission-hook.key')).mode & 0o777;
-  assert.equal(mode, 0o600);
 });
 
 // The gap this closes is invisible in every test above: they mount the
@@ -316,7 +254,7 @@ test('a session the start route prepared is known before its meta entry exists',
       headers: { 'content-type': 'application/json', 'x-claudux-session-secret': secret },
       body: JSON.stringify({ tool_name: 'Bash' }),
     });
-    assert.equal(early.status, 404, 'precondition: without meta and without prepare, unknown');
+    assert.equal(early.status, 403, 'precondition: without meta and without prepare, unknown');
 
     app.locals.permissionStore.prepare(SESSION);
     const prepared = await fetch(`${base}/api/permission/${SESSION}`, {

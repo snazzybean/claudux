@@ -516,10 +516,14 @@ test('conversationView caps the number of events and keeps the newest', () => {
   assert.equal(view.events.at(-1).uuid, 'u249');
 });
 
-test('conversationView reports the queue and every root beside the events', () => {
+// The roots are NOT among them, deliberately: segmentStarts() parses the
+// whole window again, and the "new conversation here" divider it was meant
+// for was never built. It stays a function of its own for whoever does build
+// one - it is a scan per read that pays for nothing today.
+test('conversationView reports the queue and the live segment beside the events', () => {
   const view = conversationView(forkedTranscript());
   assert.deepEqual(view.queue.waiting, [{ content: 'still waiting' }]);
-  assert.deepEqual(view.segmentStarts, ['att', 'root2']);
+  assert.equal(view.segmentStarts, undefined);
   assert.equal(view.segmentStart, 'root2');
 });
 

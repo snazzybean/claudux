@@ -18,14 +18,15 @@ import { usageRouter } from './routes/usage.js';
 import { updateRouter } from './routes/update.js';
 import { cleanupOldModules } from './lib/updateRun.js';
 import { checkNoGlobalAuthOverride } from '../scripts/check-settings-guard.js';
-import { cleanupSessionTokenFiles } from './lib/sessionTokenFile.js';
+import { cleanupSessionTokenFiles, cleanupSessionSecretFiles } from './lib/sessionTokenFile.js';
 import { cleanupHookSettingsFiles } from './lib/hookSettingsFile.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import * as ttydManager from './lib/ttydManager.js';
 import { isAllowedUpgradeOrigin } from './lib/originGuard.js';
 import { createAccessGate, hasValidSession } from './lib/accessGate.js';
 import { accessPublicRouter, accessProtectedRouter } from './routes/access.js';
-import { permissionHookRouter, permissionViewRouter, createPermissionStore } from './routes/permission.js';
+import { permissionHookRouter, permissionViewRouter } from './routes/permission.js';
+import { createPermissionStore, forgetDialogIfSettled } from './lib/permissionStore.js';
 import { getMeta } from './lib/sessionMeta.js';
 import { startReaperInterval } from './lib/reaper.js';
 import { startStatusWatcherInterval } from './lib/statusWatcher.js';
@@ -203,14 +204,19 @@ export function startServer(config = loadConfig()) {
   // waiting for them anymore - whatever is left is a pure token leftover
   // on disk and gets removed here.
   cleanupSessionTokenFiles(config.dataDir);
+  // The hook secret travels the same way and is left behind by the same
+  // failures - a start that never got as far as the wrapper.
+  cleanupSessionSecretFiles(config.dataDir);
   // Same reasoning for pasted screenshots: an upload only matters for the
   // paste that follows it.
   cleanupUploads();
   // And for the hook settings files: every session started from here on
-  // writes its own. Not quite the same reasoning though - the sweep keeps a
-  // grace period for the session that was starting as this service
-  // restarted, see hookSettingsFile.js.
-  cleanupHookSettingsFiles(config.dataDir);
+  // writes its own. Not quite the same reasoning though - a session survives
+  // a restart of this service and keeps its file, so this sweep asks tmux
+  // which ones are still running (see hookSettingsFile.js). That makes it
+  // async, and nothing here waits for it: a file written while it runs
+  // belongs to a session that is starting, which its grace period keeps.
+  cleanupHookSettingsFiles(config.dataDir).catch(() => {});
   // Left over from a completed update: the old modules stay in place while
   // the previous process is still using them (see updateRun.js).
   cleanupOldModules().catch(() => {});
@@ -220,7 +226,13 @@ export function startServer(config = loadConfig()) {
   const claudeCodeUpdate = startClaudeCodeUpdateInterval(config);
   const app = createApp(config, { claudeCodeUpdateJob: claudeCodeUpdate.job });
   const stopStatusWatcher = startStatusWatcherInterval(config, {
-    onEvents: (list) => list.forEach((event) => app.locals.publishStatus(event)),
+    // The status stream is also what tells the permission store that a box
+    // has gone (see forgetDialogIfSettled) - the carrier in the event is the
+    // id the hook posts under.
+    onEvents: (list) => list.forEach((event) => {
+      forgetDialogIfSettled(app.locals.permissionStore, event);
+      app.locals.publishStatus(event);
+    }),
   });
   const subagentWatcher = startSubagentWatcherInterval(config, {
     onEvents: (list) => list.forEach(app.locals.publishSubagents),

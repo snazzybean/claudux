@@ -258,6 +258,28 @@ test('DELETE /api/sessions/:id removes the hook settings file of a session that 
   }
 });
 
+// The other half of the same per-session state: the settings file lives on
+// disk, the dialog the hook reported lives in memory, and both are pointless
+// once the session they describe is over. Only the file was ever removed.
+test('DELETE /api/sessions/:id clears the dialog the hook left for that session', async () => {
+  const config = tmpConfig();
+  const app = createApp(config);
+  const server = app.listen(0);
+  const { port } = server.address();
+
+  const name = crypto.randomUUID();
+  app.locals.permissionStore.put(name, { toolName: 'Bash', at: Date.now() });
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${name}`, { method: 'DELETE' });
+
+    assert.equal(res.status, 204);
+    assert.equal(app.locals.permissionStore.get(name), null, 'the dialog was left in the store');
+  } finally {
+    server.close();
+  }
+});
+
 // ---------- PATCH /api/sessions/:id ----------
 //
 // Two properties of a session that the user must be able to change:
@@ -573,11 +595,13 @@ test('GET /api/sessions/:id/pane returns the visible pane content raw and cleane
     // has to interpret terminal text itself: what the session is asking,
     // and whether its input line is empty. This pane is a bare `sleep`, so
     // there is no dialog and no prompt line at all - and no prompt line is
-    // deliberately NOT an empty one (see promptIsEmpty): every guard built
-    // on it errs towards refusing. What the two readings do with real box
-    // shapes is pinned in test/paneDialog.test.js against nine captures.
+    // deliberately neither an empty one nor an occupied one (see
+    // promptIsEmpty): every guard built on it errs towards refusing, and the
+    // one that names the input line must not be the one that fires. What the
+    // two readings do with real box shapes is pinned in
+    // test/paneDialog.test.js against nine captures.
     assert.deepEqual(body.dialog, { open: false, options: [], mirrored: '' });
-    assert.equal(body.promptEmpty, false);
+    assert.equal(body.promptEmpty, null);
   } finally {
     server.close();
     await killSession(name).catch(() => {});

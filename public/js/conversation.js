@@ -88,8 +88,30 @@ function stateFor(carrier) {
       // the carrier alone, and a vanished session still has a carrier.
       gone: false,
     });
+    forgetOldStates(carrier);
   }
   return stateBySession.get(carrier);
+}
+
+// How many sessions' loaded windows the page keeps. One per carrier ever
+// visited grew for the life of the page - each holding up to 200 events with
+// a 4000-character result and a 20-hunk patch apiece - where the precedent
+// this map was built on (lastDirectory in files.js) holds a string.
+//
+// The number is what a session switch costs when it misses: one tail read.
+const MAX_KEPT_STATES = 8;
+
+// In insertion order, so the oldest visit goes first - and only entries with
+// nothing waiting on them. A state carrying a card for something sent, or a
+// lock over keys that are already out, IS the receipt for those: dropping it
+// would take a pending card's clock away and put a button back inside the
+// window it must not be in (the same reasoning restart() carries them for).
+function forgetOldStates(keep) {
+  for (const [carrier, state] of stateBySession) {
+    if (stateBySession.size <= MAX_KEPT_STATES) return;
+    if (carrier === keep || state.pending.length || state.answered || state.takeBack) continue;
+    stateBySession.delete(carrier);
+  }
 }
 
 // ---------- what one event looks like ----------
@@ -410,6 +432,16 @@ export function noteSessionStatus({ tmuxSession, sessionId, state }) {
   for (const id of [tmuxSession, sessionId]) if (id) statusById.set(id, state);
 }
 
+// The open row again, from app.js's own refresh of the list. `session` is
+// otherwise the object this view was entered with, and its `activity` is
+// what isBusy falls back on below - a snapshot that never gets newer. Guarded
+// on the carrier, so a row arriving for another session cannot switch this
+// view onto it.
+export function noteSessionRow(row) {
+  if (!session || !row || carrierOf(row) !== carrierOf(session)) return;
+  session = row;
+}
+
 // `busy` is the only one of the four that means "producing". `waiting` and
 // `idle` both wait on a person, `shell` on a background command. The row's
 // own collapsed activity is the fallback until the first change arrives, and
@@ -419,6 +451,9 @@ export function noteSessionStatus({ tmuxSession, sessionId, state }) {
 // One reader for both the poll cadence and the Stop button: two copies of
 // this expression would drift, and they would then disagree about whether
 // the session is producing anything.
+//
+// The fallback is only as fresh as the last list fetch, which is what
+// noteSessionRow above keeps up - with the stream down it is all there is.
 function isBusy() {
   const raw = statusById.get(carrierOf(session)) ?? statusById.get(session?.id);
   if (raw) return raw === 'busy';
@@ -719,6 +754,29 @@ function tailIsDue(state) {
   return Date.now() - state.tailAt >= TAIL_EVERY_MS;
 }
 
+// A tail read now, for a caller that has to act on what it brings back rather
+// than on the budget - the queue is the only thing that travels on it, and
+// the one destructive control in this view aims at an entry in that queue.
+//
+// The three conditions from tailIsDue and not its budget: those three are what
+// makes a tail read safe to run at all, and none of them is a clock. Where one
+// of them holds the answer is `false` rather than a wait - a read that is in
+// flight lands within the moment, and refusing says so where racing it would
+// put two whole-window writes in the air at once.
+async function freshQueue(state) {
+  if (!stickToBottom || state.loadingOlder || state.reading) return false;
+  state.tailAt = 0;
+  try {
+    await loadTail({ first: false });
+  } catch {
+    // Reported by the caller rather than here: this runs from a click and
+    // the answer to it is that nothing was sent, which is the caller's
+    // sentence. A poll failing on its own stays silent, as it does elsewhere.
+    return false;
+  }
+  return true;
+}
+
 // Everything on screen is dropped and the end of the file read afresh.
 // Clearing the state object is what makes every read still in flight discard
 // itself rather than write into the new view (see stillCurrent).
@@ -739,10 +797,17 @@ async function restart(carrier, { keepPending = false } = {}) {
   // three reasons to start over. Dropped with the rest it would take the card
   // off the screen for a tick, drop the receipt for a keystroke on its way,
   // and leave the buttons drawn from the old box comparing against nothing.
+  //
+  // The take-back lock is the same kind of thing and travels for the same
+  // reason: it covers keys that are already out. Dropped, the button comes
+  // back inside the window the pane needs to redraw, and a second press would
+  // pass its gate on the picture from before the first one - which is exactly
+  // what the lock exists to prevent.
   if (previous) {
     state.dialog = previous.dialog;
     state.held = previous.held;
     state.answered = previous.answered;
+    state.takeBack = previous.takeBack;
   }
   stickToBottom = true;
   hideJump();
@@ -1505,14 +1570,19 @@ function waitingOf(state) {
 
 // Gone from the queue is the only thing that says the take-back went through:
 // an entry leaves it either as a turn or without one, and this view cannot
-// see which from the queue alone. An entry whose enqueue line carried no
-// content cannot be told apart from another one, so for those the count is
-// all there is to compare.
+// see which from the queue alone. Three answers, and the third is why this
+// does not test the queue's LENGTH: a queue that drained a turn boundary is
+// shorter too, and reading that as success puts "Taken back" on screen about
+// a message that was sent. So the aimed-at ENTRY has to be gone - one fewer
+// entry carrying its text, since two entries can carry the same one and
+// removing one of a pair must not read as a failure. An entry whose enqueue
+// line carried no content has no text to count, and for that one there is
+// nothing to compare: `null` is this view saying it cannot tell.
 function takeBackDone(state) {
   const waiting = waitingOf(state);
-  const { content, length } = state.takeBack;
-  if (waiting.length < length) return true;
-  return content !== null && !waiting.some((item) => item?.content === content);
+  const { content, count } = state.takeBack;
+  if (content === null) return null;
+  return waiting.filter((item) => item?.content === content).length < count;
 }
 
 // Whether this card's message is the one a take-back was aimed at. Same rule
@@ -1546,8 +1616,17 @@ function settleTakeBack(state, readAt) {
     state.tailAt = 0;
     return;
   }
-  if (takeBackDone(state)) state.takeBack = null;
-  else state.takeBack.checked = true;
+  const done = takeBackDone(state);
+  if (done === true) {
+    state.takeBack = null;
+    return;
+  }
+  state.takeBack.checked = true;
+  // Carried on the lock rather than recomputed in the renderer: it decides
+  // which sentence the box says, and the two differ in what they claim - one
+  // says the keys went nowhere, the other says this view cannot see whether
+  // they did.
+  state.takeBack.unsure = done === null;
 }
 
 function queueEntryNode(entry) {
@@ -1607,11 +1686,15 @@ function renderQueue(state) {
   // with a read behind it the sentence has no place up there, directly above a
   // line saying the box is a picture of an older moment: two statements that
   // disagree are worse than either alone.
-  const late = actionable && Boolean(state?.takeBack) && state.takeBack.checked
-    && Date.now() - state.takeBack.at > TAKEBACK_GRACE_MS;
+  const settled = actionable && Boolean(state?.takeBack) && state.takeBack.checked;
+  // No grace in front of this one, unlike the sentence below it: the grace is
+  // there to give a slow keystroke time to show, and no amount of waiting
+  // resolves an entry that carries no text to look for.
+  const unsure = settled && Boolean(state.takeBack.unsure);
+  const late = settled && !unsure && Date.now() - state.takeBack.at > TAKEBACK_GRACE_MS;
   const mark = JSON.stringify([
     carrierOf(session), waiting.map((item) => item?.content ?? null),
-    actionable, late, takeBackPending(state),
+    actionable, late, unsure, takeBackPending(state),
   ]);
   conversationQueueEl.hidden = waiting.length === 0;
   queueActionable = waiting.length === 0 ? null : actionable;
@@ -1626,6 +1709,7 @@ function renderQueue(state) {
   list.append(...waiting.map(queueEntryNode));
   const nodes = [list];
   if (late) nodes.push(hintNode('Sent, and it is still waiting - the terminal took those keys somewhere else.'));
+  if (unsure) nodes.push(hintNode('Sent - the waiting message carries no text, so this view cannot tell whether it went. The terminal tab shows what is left.'));
   // A locked-out button is replaced by the reason, never left there to be
   // tapped into nothing: what the box says is what it is doing.
   if (actionable) nodes.push(takeBackButton());
@@ -1685,10 +1769,14 @@ async function promptIsClear(carrier) {
     if (res.status === 404) return 'gone';
     if (!res.ok) return 'unknown';
     const pane = await res.json();
-    // An open box has no input line at all, so promptEmpty is false for it
-    // too - one refusal covers both, and the sentence names the reason the
-    // pane can show.
+    // An open box has no input line at all, and this is the reason the pane
+    // can name, so it comes first.
     if (pane.dialog?.open) return 'dialog';
+    // No input line and no box either - a full-screen state, or a server too
+    // old to send the field. Both are "cannot tell", and neither is the line
+    // being occupied: "clear that line" would send someone looking for text
+    // that is not there.
+    if (typeof pane.promptEmpty !== 'boolean') return 'unknown';
     return pane.promptEmpty ? 'empty' : 'busy';
   } catch {
     return 'unknown';
@@ -1714,11 +1802,26 @@ async function takeBack() {
   // click on a control the view never showed must not put an entry in the map.
   const state = stateBySession.get(carrier);
   if (!carrier || !state || takingBack) return;
-  const waiting = waitingOf(state);
-  const target = waiting.at(-1);
-  if (!target) return;
+  if (!waitingOf(state).length) return;
   takingBack = true;
   try {
+    // The box first, and only then the target. What is on screen travels on a
+    // tail read and on nothing else, and that read has a 30 s budget - so even
+    // at the end of the conversation, where the button is offered, the box can
+    // be half a minute behind, and a queue drains at every turn boundary. The
+    // entry aimed at would then be one that has already gone out, and the keys
+    // would take whatever has since taken its place.
+    if (!(await freshQueue(state))) {
+      showError('The conversation could not be read just now - nothing was sent. Try again in a moment.');
+      return;
+    }
+    if (!sameView(carrier, state)) return;
+    const waiting = waitingOf(state);
+    const target = waiting.at(-1);
+    if (!target) {
+      showToast('Nothing is waiting any more - the queue has gone out.');
+      return;
+    }
     const gate = await promptIsClear(carrier);
     // The session can have been swapped while that was in flight, and the
     // iframe with it - the keys would land in another session's terminal.
@@ -1750,9 +1853,12 @@ async function takeBack() {
       showError('Only half of it went out - the message is on the terminal input line now. Clear it there.');
       return;
     }
+    const content = target.content ?? null;
     state.takeBack = {
-      content: target.content ?? null,
-      length: waiting.length,
+      content,
+      // How many entries carried that text when the keys went out, so one of
+      // a pair going is a withdrawal rather than a puzzle (see takeBackDone).
+      count: waiting.filter((item) => (item?.content ?? null) === content).length,
       at: Date.now(),
       // The last read handed out before the keys left, so a read already in
       // flight cannot answer for this one (see settleTakeBack).
@@ -1897,22 +2003,30 @@ function settleAnswer(state, readAt) {
   if (readAt > lock.readAt) lock.checked = true;
 }
 
-// Read, Write and Edit are the permissions that come up most, and their tool
-// name on its own says nothing about what is being asked - so the one argument
-// that identifies the call travels with it.
-//
-// Cut from opposite ends, because the informative end differs: a command says
-// what it is in its first word, a path in its last. Cutting a path from the
-// back would leave the directory and drop the file name - the one thing the
-// title exists to say.
-function toolDetail(input) {
-  const command = typeof input?.command === 'string' && input.command ? input.command : null;
-  const filePath = typeof input?.file_path === 'string' && input.file_path ? input.file_path : null;
-  const detail = command ?? filePath;
-  if (!detail || detail.length <= MAX_TITLE_DETAIL) return detail;
-  return command
-    ? `${detail.slice(0, MAX_TITLE_DETAIL)}…`
-    : `…${detail.slice(-MAX_TITLE_DETAIL)}`;
+// A tool's name on its own says nothing about what is being asked, so the one
+// argument that identifies the call travels beside it. The keys and their
+// order mirror DETAIL_KEYS in src/lib/toolDetail.js, which answers the same
+// question for the tool cards a few pixels above this one - copied rather
+// than imported because the browser cannot reach a module under src/, and
+// named differently because this one does something that belongs to a title
+// and not to the shared question: it cuts.
+const DETAIL_KEYS = ['command', 'file_path', 'pattern', 'path', 'url', 'description'];
+// The two whose informative end is the LAST one. Cutting a path from the back
+// leaves the directory and drops the file name - the one thing the title
+// exists to say - while a command says what it is in its first word.
+const TAIL_KEYS = ['file_path', 'path'];
+
+function titleDetail(input) {
+  if (!input || typeof input !== 'object') return null;
+  for (const key of DETAIL_KEYS) {
+    const value = input[key];
+    if (typeof value !== 'string' || !value) continue;
+    if (value.length <= MAX_TITLE_DETAIL) return value;
+    return TAIL_KEYS.includes(key)
+      ? `…${value.slice(-MAX_TITLE_DETAIL)}`
+      : `${value.slice(0, MAX_TITLE_DETAIL)}…`;
+  }
+  return null;
 }
 
 // From the hook and never from the pane: no rule for where the question sits
@@ -1929,7 +2043,7 @@ function dialogTitle(held) {
     return held.toolInput?.questions?.[0]?.question ?? 'A question';
   }
   if (held.toolName === 'ExitPlanMode') return 'Ready to execute this plan';
-  const detail = toolDetail(held.toolInput);
+  const detail = titleDetail(held.toolInput);
   return detail ? `${held.toolName} · ${detail}` : held.toolName;
 }
 
@@ -2095,9 +2209,17 @@ async function readPaneDialog(carrier) {
 // payload standing rather than clearing it: no answer means unknown, not "no
 // content for this box", and the card would otherwise lose its title to one
 // missed request.
+//
+// A 404 is not one of those. It says this server holds no permission state
+// for this session at all - a session it never started, which therefore never
+// had a hook - and that is an answer: no payload, rather than none that could
+// be read. The difference decides whether a key may go out at all, since
+// answering refuses on a payload it could not refresh (see answer) and the
+// box's own keys work without a hook by design.
 async function readHeldDialog(carrier) {
   try {
     const res = await fetch(`/api/permission/${encodeURIComponent(carrier)}`);
+    if (res.status === 404) return { held: null };
     if (!res.ok) return {};
     return { held: (await res.json()).dialog ?? null };
   } catch {
@@ -2203,7 +2325,15 @@ async function answer(key, mark) {
   if (!carrier || !state || answering || answerPending(state)) return;
   answering = true;
   try {
-    const read = await readPaneDialog(carrier);
+    // Both sources, the same pair refreshDialog reads - and that is the point
+    // of the pair here. The mark is three things, and the payload's timestamp
+    // is the one of them that tells two boxes with the same options apart.
+    // Read the pane alone and two thirds of the mark are fresh while that
+    // third is whatever the last tick left behind, which for a session with a
+    // box open is the idle cadence: a box answered in the terminal and
+    // replaced by its own retry would compare equal, and the key would go into
+    // the box nobody read.
+    const [read, hook] = await Promise.all([readPaneDialog(carrier), readHeldDialog(carrier)]);
     // The session can have been swapped while that was in flight, and the
     // iframe with it - the keys would land in another session's terminal.
     if (!sameView(carrier, state)) return;
@@ -2225,6 +2355,18 @@ async function answer(key, mark) {
       showToast('Already answered in the terminal.');
       return;
     }
+    // Only with the box still standing, so the payload is never cleared from
+    // here: refreshDialog owns that half - it clears the store as well as the
+    // state, and it does so on the evidence that no box is open.
+    if (!('held' in hook)) {
+      // Unlike the failed read above, this one leaves the payload standing
+      // (see readHeldDialog) - so refusing is the only way to say that the
+      // discriminator could not be refreshed. A key sent on an unrefreshed one
+      // is exactly the send this pair exists to prevent.
+      showError('The terminal could not be read just now - nothing was sent. Try again in a moment.');
+      return;
+    }
+    state.held = hook.held;
     if (dialogMark(state) !== mark) {
       // The card is not this box any more - either another one is standing,
       // or this one was redrawn at a width that folds its labels differently.

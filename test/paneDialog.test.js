@@ -476,7 +476,9 @@ test('A3: ExitPlanMode with a numbered plan above it, 120 columns - the plan ste
     { key: '3', label: 'Tell Claude what to change' },
   ]);
   assert.equal(dialog.mirrored, clean);
-  assert.equal(promptIsEmpty(clean), false);
+  // No input line anywhere on this pane, which is neither "empty" nor
+  // "occupied" - the caller has to be able to tell those apart.
+  assert.equal(promptIsEmpty(clean), null);
 });
 
 test('A3b: same plan-confirmation box, 40 columns - open without relying on its own (unmatched) footer', () => {
@@ -488,7 +490,9 @@ test('A3b: same plan-confirmation box, 40 columns - open without relying on its 
     { key: '2', label: 'Yes, manually approve edits' },
     { key: '3', label: 'Tell Claude what to change' },
   ]);
-  assert.equal(promptIsEmpty(clean), false);
+  // No input line anywhere on this pane, which is neither "empty" nor
+  // "occupied" - the caller has to be able to tell those apart.
+  assert.equal(promptIsEmpty(clean), null);
 });
 
 test('A4: Bash permission box with an unrelated rejected plan above it, 120 columns - keys are not duplicated', () => {
@@ -590,6 +594,8 @@ test('promptIsEmpty reads the LAST prompt line, not the first', () => {
   assert.equal(promptIsEmpty(empty), true);
 });
 
-test('promptIsEmpty says false when there is no prompt line at all', () => {
-  assert.equal(promptIsEmpty('no prompt here'), false);
+// Not `false`: a caller refusing on false names the input line in its
+// message, and there is none here to clear.
+test('promptIsEmpty says it cannot tell when there is no prompt line at all', () => {
+  assert.equal(promptIsEmpty('no prompt here'), null);
 });

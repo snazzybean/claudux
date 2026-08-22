@@ -1,6 +1,10 @@
-// One settings file per session, holding the PermissionRequest hook that
-// buildHookSettings() describes. It travels to `claude` in --settings, which
-// makes it a start option rather than configuration.
+// The PermissionRequest hook a session starts with: what it says, and the
+// one file per session that carries it. It travels to `claude` in
+// --settings, which makes it a start option rather than configuration.
+//
+// Both halves live here because they are one fact. The builder used to sit
+// in tmuxManager.js, which builds tmux arguments and has nothing to do with
+// what is inside this file.
 //
 // 0600 in a 0700 directory - the file names the route that accepts this
 // session's dialogs, and no other local account has business in it.
@@ -11,8 +15,13 @@
 // session is ended by hand, and as a sweep at service startup.
 import fs from 'node:fs';
 import path from 'node:path';
+import { listTmuxSessions, aliveSessionNames } from './tmuxManager.js';
 
 const DIR_NAME = 'hook-settings';
+
+// A corpse is not a session: with remain-on-exit a crashed one stays listed,
+// and its file really is a leftover.
+const liveSessionNames = async () => aliveSessionNames(await listTmuxSessions());
 
 // How long a file is treated as possibly-not-yet-read by the sweep below.
 // Wide on purpose: the interval it has to cover is a session start, and
@@ -42,6 +51,35 @@ function settingsPath(dataDir, sessionId) {
   return path.join(settingsDir(dataDir), `${sessionId}.json`);
 }
 
+// The hook that tells Claudux a session is asking something. A START
+// OPTION rather than configuration: it travels in --settings on the command
+// line, so nothing in ~/.claude is touched and nobody has to configure
+// anything - and hooks given this way add to whatever hooks already exist
+// instead of replacing them.
+export function buildHookSettings(port, sessionId) {
+  return {
+    hooks: {
+      PermissionRequest: [
+        {
+          hooks: [
+            {
+              type: 'http',
+              url: `http://127.0.0.1:${port}/api/permission/${sessionId}`,
+              // The secret comes from the environment, not from this
+              // file: a literal here would put it on disk for as long as
+              // the session lives, where the file it does travel in is
+              // unlinked by the wrapper the moment it has been read.
+              headers: { 'x-claudux-session-secret': '$CLAUDUX_SESSION_SECRET' },
+              allowedEnvVars: ['CLAUDUX_SESSION_SECRET'],
+              timeout: 30,
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 export function writeHookSettingsFile(dataDir, sessionId, settings) {
   const filePath = settingsPath(dataDir, sessionId);
   const dir = settingsDir(dataDir);
@@ -65,29 +103,37 @@ export function removeHookSettingsFile(dataDir, sessionId) {
 }
 
 // Call this on service startup: every session started from here on gets a
-// fresh file, and the sessions that outlive a restart of this service got
-// theirs at their own start.
+// fresh file, and what is left over belongs to a session that is over.
 //
-// Except for the one that was starting AS the service restarted: the file is
-// written a moment before `claude` gets to read it, and a restart in between
-// would take it away unnoticed - that session would then run its whole life
-// without the hook, with its permission dialogs appearing in the terminal
-// only. Hence the grace period, keyed on the file's own mtime: nothing else
-// here can tell a file that has been read from one that is about to be.
-export function cleanupHookSettingsFiles(dataDir) {
+// Two conditions, and each covers a case the other cannot see. The deploy
+// step is a restart, and `KillMode=process` leaves every `claude` running -
+// so a file whose session is still alive is not a leftover at all, whether
+// or not `claude` ever reads it again after its start. That is what the name
+// check is for, and it is the common case rather than the exotic one.
+//
+// The mtime grace covers the one moment the name check cannot: the file is
+// written a moment BEFORE the spawn, so a session starting as the service
+// restarts has a file and no tmux session yet. Losing it would leave that
+// session running its whole life without the hook, its permission dialogs
+// appearing in the terminal only, and nothing saying so.
+export async function cleanupHookSettingsFiles(dataDir, { liveNamesFn = liveSessionNames } = {}) {
   const dir = settingsDir(dataDir);
   const cutoff = Date.now() - START_GRACE_MS;
+  let entries;
   try {
-    for (const entry of fs.readdirSync(dir)) {
-      const filePath = path.join(dir, entry);
-      try {
-        if (fs.statSync(filePath).mtimeMs > cutoff) continue;
-        fs.rmSync(filePath, { force: true });
-      } catch {
-        // One unreadable or undeletable file must not leave the rest behind.
-      }
-    }
+    entries = fs.readdirSync(dir);
   } catch {
-    // Directory doesn't exist yet - nothing to clean up.
+    return; // Directory doesn't exist yet - nothing to clean up.
+  }
+  const live = new Set(await liveNamesFn());
+  for (const entry of entries) {
+    const filePath = path.join(dir, entry);
+    try {
+      if (live.has(path.basename(entry, '.json'))) continue;
+      if (fs.statSync(filePath).mtimeMs > cutoff) continue;
+      fs.rmSync(filePath, { force: true });
+    } catch {
+      // One unreadable or undeletable file must not leave the rest behind.
+    }
   }
 }

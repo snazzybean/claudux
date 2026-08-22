@@ -8,6 +8,9 @@ import {
   writeSessionTokenFile,
   removeSessionTokenFile,
   cleanupSessionTokenFiles,
+  writeSessionSecretFile,
+  removeSessionSecretFile,
+  cleanupSessionSecretFiles,
 } from '../src/lib/sessionTokenFile.js';
 
 const TOKEN = `sk-ant-oat01-${'A'.repeat(95)}`;
@@ -126,4 +129,63 @@ test('removeSessionTokenFile hits the file even with a relative dataDir', () => 
   } finally {
     fs.rmSync('./data-test-relative2', { recursive: true, force: true });
   }
+});
+
+// ---------- the hook secret, the second value on the same route ----------
+//
+// It used to travel as the secret itself in argv, which
+// `tmux list-panes -F '#{pane_start_command}'` prints verbatim for the life
+// of the pane - and the tmux server's own /proc/<pid>/cmdline keeps the argv
+// of whichever session started it, mode 444, for as long as the server runs.
+// The rule this repo wrote for the token covers this value too.
+const SECRET = 'a'.repeat(64);
+
+test('writeSessionSecretFile creates the file 0600 in a 0700 directory of its own', () => {
+  const dataDir = tmpDataDir();
+
+  const filePath = writeSessionSecretFile(dataDir, 'sess-1', SECRET);
+
+  assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.dirname(filePath)).mode & 0o777, 0o700);
+  // Its own directory: a leftover of one kind must never be read as the
+  // other, and the two are cleaned up by separate calls.
+  assert.equal(path.basename(path.dirname(filePath)), 'session-secrets');
+  assert.equal(fs.readFileSync(filePath, 'utf8'), SECRET);
+});
+
+// Same reason as the token file's: the path travels to tmux as an argv
+// element and the wrapper resolves it against ITS OWN working directory,
+// which is the project path rather than the server's. A relative one would
+// leave the session without a hook and the secret on disk.
+test('writeSessionSecretFile returns an absolute path, even with a relative dataDir', () => {
+  const filePath = writeSessionSecretFile('./data-test-secret-relative', 'sess-rel', SECRET);
+
+  try {
+    assert.equal(path.isAbsolute(filePath), true, `Path is relative: ${filePath}`);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), SECRET);
+  } finally {
+    fs.rmSync('./data-test-secret-relative', { recursive: true, force: true });
+  }
+});
+
+test('writeSessionSecretFile rejects a session ID with path components', () => {
+  const dataDir = tmpDataDir();
+
+  assert.throws(() => writeSessionSecretFile(dataDir, '../../etc/passwd', SECRET));
+});
+
+// A start that never got as far as the wrapper leaves the secret on disk,
+// the same way it leaves the token there.
+test('removeSessionSecretFile and the startup sweep both clear a leftover', () => {
+  const dataDir = tmpDataDir();
+  const one = writeSessionSecretFile(dataDir, 'sess-1', SECRET);
+  writeSessionSecretFile(dataDir, 'sess-2', SECRET);
+
+  removeSessionSecretFile(dataDir, 'sess-1');
+  assert.equal(fs.existsSync(one), false);
+  assert.doesNotThrow(() => removeSessionSecretFile(dataDir, 'does-not-exist'));
+
+  cleanupSessionSecretFiles(dataDir);
+  assert.deepEqual(fs.readdirSync(path.join(dataDir, 'session-secrets')), []);
+  assert.doesNotThrow(() => cleanupSessionSecretFiles(tmpDataDir()));
 });

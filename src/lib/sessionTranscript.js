@@ -378,7 +378,6 @@ export function conversationView(jsonlText, { anchor = null, filtered = true } =
   return {
     events: events.slice(-MAX_EVENTS),
     abandoned,
-    segmentStarts: segmentStarts(jsonlText),
     queue: queueState(jsonlText),
     // Where the walk ended: the live segment's first turn, or null.
     segmentStart: walk ? walk.segmentStart : null,

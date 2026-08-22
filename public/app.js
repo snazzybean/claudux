@@ -44,7 +44,7 @@ import { initUsage } from './js/usage.js';
 import { initSubagents, startSubagentDebug } from './js/subagents.js';
 import { initAgentWindows } from './js/agentWindows.js';
 import { showFiles, leaveFiles } from './js/files.js';
-import { showConversation, leaveConversation, noteSessionStatus } from './js/conversation.js';
+import { showConversation, leaveConversation, noteSessionStatus, noteSessionRow } from './js/conversation.js';
 import { initTerminalLinks } from './js/terminalLinks.js';
 import { initUpdate } from './js/update.js';
 import { initClaudeCodeUpdate } from './js/claudeCodeUpdate.js';
@@ -208,6 +208,12 @@ async function loadProjects({ still = false } = {}) {
     // Before anything reads the new model: the fetched states go into the
     // map the dots are built from, so a rebuild below shows them too.
     absorbFetchedActivity();
+    // And the conversation view gets the row again. It holds the object it
+    // was entered with, whose `activity` is what its Stop button falls back
+    // on until the status stream reports a CHANGE - a session that was
+    // already working when this page loaded would otherwise keep that button
+    // hidden for as long as it never changes state.
+    if (appEl.dataset.tab === 'conversation') noteSessionRow(openSessionRow());
     // On the background tick, only rebuild if something actually changed:
     // render() replaces the whole sidebar, which closes any open select,
     // discards the scroll position, and ends edit mode. The time labels and

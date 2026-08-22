@@ -6,10 +6,9 @@
 // something.", "allow reading from /etc during this session"). So the
 // numbering can only come from here.
 //
-// No `question` field: measured against five real box shapes at two
-// widths, no rule for "where the question sits" reproduced more than two
-// of the five. A permission box has no blank line between question and
-// options, `AskUserQuestion` and `ExitPlanMode` do, and at 40 columns a
+// No `question` field: no rule for "where the question sits" holds across
+// the box shapes. A permission box has no blank line between question and
+// options, `AskUserQuestion` and `ExitPlanMode` do, and at narrow widths a
 // wrapped footer moves the anchor either way. Nothing reads the field
 // either - the card takes its title from the hook payload (the question
 // text for `AskUserQuestion`, the whole plan for `ExitPlanMode`, tool and
@@ -20,19 +19,16 @@
 // test-driven, public/ has no test touching it.
 
 // "❯ 1. Yes" for the selected option, "  2. No" for the others. Any
-// amount of leading whitespace is accepted on purpose: measured across
-// three box styles, an unselected option's indent is not consistent
-// relative to the selected one (same as it in a permission box, two
-// columns deeper in an `ExitPlanMode` confirmation) - the pattern has to
-// tolerate both rather than assume either.
+// amount of leading whitespace is accepted on purpose: an unselected
+// option's indent is not consistent relative to the selected one - same as
+// it in a permission box, deeper in an `ExitPlanMode` confirmation - so the
+// pattern has to tolerate both rather than assume either.
 const OPTION_LINE = /^(\s*)(❯\s*)?(\d+)\.\s+(.*\S)\s*$/;
 
-// The two closing lines actually seen on a real pane. `Enter to confirm`,
-// which the pattern used to check for, never appeared in any capture and
-// is dropped. Case matters for `Esc to cancel`: a lowercase `esc to
-// cancel` shows up inside an unrelated status line ("Usage limit reached
-// … · esc to cancel"), and matching that would mirror the pane where the
-// terminal is otherwise idle.
+// The two closing lines a real pane actually carries. Case matters for
+// `Esc to cancel`: a lowercase `esc to cancel` shows up inside an unrelated
+// status line ("Usage limit reached … · esc to cancel"), and matching that
+// would mirror the pane where the terminal is otherwise idle.
 const DIALOG_FOOTER = /Esc to cancel|ctrl\+g to edit in Vim/;
 
 // The input line. A pane can hold several of these (an answered dialog
@@ -54,11 +50,10 @@ function blankGapAfter(lines, index) {
 // The open dialog, if there is one, is the last thing on the pane - so
 // its options are the LAST contiguous run of numbered lines. "Contiguous"
 // lets an unnumbered line extend the run only while it sits deeper than
-// the option it hangs off; that is what keeps an old plan's numbered
-// steps, sitting earlier in the same scrollback, out of a later box's
-// run (measured on a Bash permission box with a rejected plan above it -
-// without the gap check, the plan's three steps and the dialog's three
-// options merge into six, keys 1-3 duplicated, plan text winning both).
+// the option it hangs off; that is what keeps an old plan's numbered steps,
+// sitting earlier in the same scrollback, out of a later box's run. Without
+// it the two merge into one run with its keys duplicated, and the plan's
+// text wins them.
 //
 // The same shape covers a wrapped label's own continuation AND an
 // `AskUserQuestion` description or an `ExitPlanMode` hint - indentation
@@ -102,13 +97,11 @@ function findLastOptionRun(lines) {
 }
 
 // A sub-line only gets folded into the label above it when the option's
-// own line sits close to the widest line anywhere on the pane - the
-// actual physical reason a line wraps. Measured: the option that really
-// wrapped sits within a few characters of that width in every capture
-// that has one (117 and 118 of 120, 38 of 40); an `AskUserQuestion`
-// description or an `ExitPlanMode` hint sits tens of characters short of
-// it regardless of how deep it is indented, which is exactly why
-// indentation cannot be the signal that decides this.
+// own line sits close to the widest line anywhere on the pane - the actual
+// physical reason a line wraps. An option that really wrapped sits within a
+// few characters of that width; an `AskUserQuestion` description or an
+// `ExitPlanMode` hint sits far short of it however deep it is indented,
+// which is exactly why indentation cannot be the signal that decides this.
 const WRAP_SLACK = 4;
 
 export function readDialog(paneText) {
@@ -118,17 +111,15 @@ export function readDialog(paneText) {
 
   const run = findLastOptionRun(lines);
   const runEndsAt = run.length > 0 ? run.at(-1).lineIndex : -1;
-  // A dialog's run sits inside a box, so a genuine blank line separates
-  // its last line from the footer (measured: exactly one, in all six
-  // dialog captures at both widths). The composer's `❯` line has no such
-  // blank line to give up: Claude Code frames it with a rule made of
-  // `LINE_CHARS` immediately below, which `sanitizePaneText` strips,
-  // collapsing that gap to zero - measured the same way on the composer
-  // idle, busy, and prefilled-text captures, and on a `❯`-led run that is
-  // itself typed or sent text ("❯ 1. fix the bug"). This depends only on
-  // that stripping, not on what (if anything) is configured to draw below
-  // the composer - a differently configured status line, or none at all,
-  // still leaves the rule for `sanitizePaneText` to remove.
+  // A dialog's run sits inside a box, so a blank line separates its last
+  // line from the footer. The composer's `❯` line has none to give up:
+  // Claude Code frames it with a rule made of `LINE_CHARS` immediately
+  // below, which `sanitizePaneText` strips, collapsing that gap to zero.
+  // That is what tells the two apart, including where the composer holds a
+  // `❯`-led run of its own ("❯ 1. fix the bug"). It depends only on the
+  // stripping, not on what (if anything) is configured to draw below the
+  // composer - a differently configured status line, or none at all, still
+  // leaves the rule for `sanitizePaneText` to remove.
   //
   // Nothing non-blank following the run at all is treated the same as a
   // zero gap: an unlocked composer with no card is the safer wrong guess
@@ -163,10 +154,14 @@ export function readDialog(paneText) {
   return { open: true, options, mirrored: text };
 }
 
+// Three answers, because "there is no input line on this pane" is not the
+// same as "there is one and it has something on it". A caller that refuses
+// on both can say so with the same sentence; one that names the input line
+// would send someone looking for text that is not there.
 export function promptIsEmpty(paneText) {
   const lines = String(paneText ?? '').split('\n');
   const promptLines = lines.filter((l) => PROMPT_LINE.test(l));
-  if (promptLines.length === 0) return false;
+  if (promptLines.length === 0) return null;
   const rest = promptLines.at(-1).match(PROMPT_LINE)[1];
   return rest.trim() === '';
 }
