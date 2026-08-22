@@ -1387,6 +1387,10 @@ function markQueued(state) {
     // the transcript for it" is exactly what was asked for.
     const taken = !queued && withdrawn(state, entry);
     entry.node.dataset.pending = queued ? 'queued' : (taken ? 'taken' : 'true');
+    // Remembered rather than read back off the node: what the clock says when
+    // it runs out depends on whether this entry was ever IN the queue, and by
+    // then it is out of it (see expire).
+    if (queued) entry.wasQueued = true;
     if (queued) entry.hint.textContent = 'Waiting in the queue.';
     else entry.hint.textContent = taken ? 'Taken back out of the queue.' : '';
     if (!queued && !taken) entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
@@ -1533,13 +1537,31 @@ async function send() {
       node,
       hint,
       timer: null,
+      // Set once the queue has been seen carrying this entry (see markQueued).
+      wasQueued: false,
       // A named function rather than an inline one: the clock is armed here and
       // armed again when a card comes back out of the queue (see markQueued).
       expire: () => {
-        node.dataset.pending = bareCommand ? 'sent' : 'stale';
-        hint.textContent = bareCommand
-          ? 'Sent - not every slash command leaves a line in the transcript.'
-          : 'Not confirmed - nothing in the transcript for it. Check the terminal.';
+        // Three sentences, because three different things are known by then.
+        //
+        // A message the SESSION took out of its own queue was delivered - and
+        // one delivered into a turn that is already running becomes part of
+        // that turn rather than a line of its own, so no line is ever coming
+        // and waiting for one is waiting for nothing. Measured on a real
+        // transcript: `enqueue` at 22:23:06, `remove` at 22:23:20, no user
+        // line for it anywhere - and the message had plainly arrived, because
+        // it was answered. That also settles what a `remove` line means: not
+        // "taken back" but "off the queue", by whichever side did it. A
+        // take-back from here is told apart by `withdrawn` in markQueued, not
+        // by the line.
+        //
+        // The alarm is kept for the one case that earns it: a message that was
+        // never in the queue and never turned up either.
+        const delivered = Boolean(entry.wasQueued);
+        node.dataset.pending = bareCommand || delivered ? 'sent' : 'stale';
+        if (bareCommand) hint.textContent = 'Sent - not every slash command leaves a line in the transcript.';
+        else if (delivered) hint.textContent = 'Sent - taken from the queue. A message taken mid-turn leaves no line of its own.';
+        else hint.textContent = 'Not confirmed - nothing in the transcript for it. Check the terminal.';
       },
     };
     entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
