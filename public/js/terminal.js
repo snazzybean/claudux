@@ -42,6 +42,13 @@ export function releaseTerminal() {
   terminalFrameEl.src = 'about:blank';
 }
 
+// Whether ttyd's xterm is really up in there. Not `term` alone: the object
+// shows up before its buffer does, and a caller acting on it that early sees a
+// terminal that has not been fitted yet.
+export function terminalIsAttached() {
+  return Boolean(terminalFrameEl.contentWindow?.term?.buffer);
+}
+
 terminalFrameEl.addEventListener('load', () => {
   const doc = terminalFrameEl.contentDocument;
   // After releasing, an empty document loads here: nothing to measure, no

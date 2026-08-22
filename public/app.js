@@ -38,6 +38,7 @@ import {
 import {
   withTerminalOptions,
   releaseTerminal,
+  terminalIsAttached,
   setStuckTerminalRecovery,
 } from './js/terminal.js';
 import { initUsage } from './js/usage.js';
@@ -1444,6 +1445,60 @@ function updateAccountBadge(session) {
   set('person', account?.name ?? 'unknown account', 'Last saved mapping (session not running)');
 }
 
+// Which tab was last on screen, so a reload comes back to it rather than to
+// the terminal every time.
+const LAST_TAB_KEY = 'claudux-last-tab';
+
+function rememberTab(name) {
+  try {
+    localStorage.setItem(LAST_TAB_KEY, name);
+  } catch {
+    // Private mode - then a reload comes back to the terminal, as it always did.
+  }
+}
+
+// Read once, at startup, and used up on the first session that opens: opening
+// a session forces the terminal tab on purpose (see below), and that has to
+// keep holding for every session opened by hand afterwards.
+let tabToRestore = (() => {
+  try {
+    return localStorage.getItem(LAST_TAB_KEY);
+  } catch {
+    return null;
+  }
+})();
+
+// Not before the terminal has actually attached. Hidden from the start, xterm
+// fits itself to a box of no height and ttyd hands that size on to tmux - the
+// window of a real session, resized by a tab this UI happened to remember. A
+// click cannot hit this because by then the terminal is up; only a restore
+// can, which is why the wait is here and not in the tab function.
+//
+// A condition, not a delay, and it gives up rather than firing into a terminal
+// that never came up. It also stands down the moment the tab is changed by
+// hand - a restore landing on top of that would take the screen away from
+// whoever just asked for it.
+const TAB_RESTORE_LOOK_MS = 120;
+const TAB_RESTORE_LOOKS = 100;
+
+function restoreLastTab() {
+  const want = tabToRestore;
+  tabToRestore = null;
+  if (want !== 'files' && want !== 'conversation') return;
+  let looks = 0;
+  const look = () => {
+    if (appEl.dataset.tab !== 'terminal') return;
+    if (terminalIsAttached()) {
+      if (want === 'files') activateFilesTab();
+      else activateConversationTab();
+      return;
+    }
+    looks += 1;
+    if (looks < TAB_RESTORE_LOOKS) setTimeout(look, TAB_RESTORE_LOOK_MS);
+  };
+  look();
+}
+
 // Forces the terminal tab (instead of files) – e.g. relevant when a new
 // session/a login terminal is opened while another session's files tab was
 // previously active.
@@ -1458,6 +1513,7 @@ function activateTerminalTab() {
   // screens through a media query, and an inline style would always
   // override that.
   appEl.dataset.tab = 'terminal';
+  rememberTab('terminal');
   updateOnboardingWizard(allAccounts(), projects);
 }
 
@@ -1476,6 +1532,7 @@ function activateFilesTab(project = currentProject) {
   tabConversationEl.dataset.active = 'false';
   terminalFrameEl.style.display = 'none';
   appEl.dataset.tab = 'files';
+  rememberTab('files');
   leaveConversation();
   // The text view covers the same area and would otherwise sit on top of
   // the file list - it doesn't belong there.
@@ -1515,6 +1572,7 @@ function activateConversationTab() {
   tabConversationEl.dataset.active = 'true';
   terminalFrameEl.style.display = 'none';
   appEl.dataset.tab = 'conversation';
+  rememberTab('conversation');
   leaveFiles();
   leaveCopyText();
   showConversation(openSessionRow());
@@ -1604,6 +1662,7 @@ function openSession(project, session) {
   updateAccountBadge(session);
   updateAuthBanner(session);
   activateTerminalTab();
+  restoreLastTab();
   // Mobile (see media query in styles.css): the sidebar and terminal panel
   // don't share the screen, so opening a session actively switches to the
   // panel view. On wide screens data-view has no effect (both columns
