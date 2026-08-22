@@ -4400,33 +4400,40 @@ button { cursor: pointer; }
   font: inherit;
   font-size: var(--fs-body);
 }
-/* A dot rather than a glyph, for the reason icons.js exists: a character
-   picked for this would be an empty box on whichever device lacks it. */
+/* A line of its own above the field: it takes the whole width of the wrap
+   container, so the field and the controls stay where they were.
+
+   The cone of light this view already uses in two places rather than a sign
+   of its own - and it borrows one half from each, because it is a status line
+   reporting a working session: the tone from .login-waiting, which is what a
+   status line looks like here, and the 2.4s of the session row's title, which
+   is what `working` looks like. A dot in the accent colour at its own cadence
+   was a third vocabulary for a state the app already speaks about. */
 .conversation-working {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-  color: var(--text-muted);
+  flex: 0 0 100%;
   font-size: var(--fs-ui);
+  background-image: linear-gradient(
+    100deg,
+    var(--text-muted) 35%,
+    var(--text) 50%,
+    var(--text-muted) 65%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.4s linear infinite;
 }
 .conversation-working[hidden] { display: none; }
-.conversation-working::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: var(--r-pill);
-  background: var(--accent);
-  animation: conversation-working-pulse 1.4s ease-in-out infinite;
-}
-@keyframes conversation-working-pulse {
-  0%, 100% { opacity: 0.25; }
-  50% { opacity: 1; }
-}
-/* Whoever asked for less motion gets the dot, not the pulse - it still says
-   the same thing by being there at all. */
+/* The global reduced-motion rule only shortens the duration, which would
+   freeze the gradient mid-sweep and leave the word half muted. Its own way
+   out, as the two rules above it have. */
 @media (prefers-reduced-motion: reduce) {
-  .conversation-working::before { animation: none; opacity: 1; }
+  .conversation-working {
+    animation: none;
+    background-image: none;
+    color: var(--text-muted);
+  }
 }
 .conversation-input::placeholder { color: var(--text-muted); }
 /* Calmer than the global focus ring, for the same reason .search-input
