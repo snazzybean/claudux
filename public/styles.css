@@ -4483,9 +4483,12 @@ button { cursor: pointer; }
   object-fit: contain;
 }
 .conversation-input {
-  /* The basis is what decides the wrap above - below this the controls move
-     to a line of their own instead of taking the width from the field. */
-  flex: 1 1 200px;
+  /* The basis is what decides the wrap above. Low enough that the two controls
+     left beside it - the image button and Send - stay on this line on a phone:
+     at 200px they were pushed onto one of their own, which cost a whole row of
+     height for three buttons. The field gives width rather than the layout
+     giving a line, and what it gives back it takes in height as it grows. */
+  flex: 1 1 120px;
   min-width: 0;
   resize: none;
   /* Against --app-height instead of vh, and here it decides the layout: the
@@ -4517,8 +4520,26 @@ button { cursor: pointer; }
    status line looks like here, and the 2.4s of the session row's title, which
    is what `working` looks like. A dot in the accent colour at its own cadence
    was a third vocabulary for a state the app already speaks about. */
-.conversation-working {
+/* The status row: the line itself takes what is left, the two controls sit at
+   its right end. Its height is whatever the tallest thing in it needs - the
+   line alone while nothing runs, a little more with a button up. */
+.conversation-statusline {
   flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-width: 0;
+}
+/* Compact in here: at the size they had in the row below, these two would
+   make the status row taller than the line it is built around. */
+.conversation-statusline .conversation-mode,
+.conversation-statusline .conversation-stop {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: var(--fs-ui);
+}
+.conversation-working {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: var(--space-sm);

@@ -261,8 +261,17 @@
                    No `role="status"`: the elapsed time in it changes every
                    tick, and a live region would read that out for as long as
                    the turn lasts. -->
-              <span class="conversation-working" id="conversationWorking" data-working="false"><span
-                    class="conversation-working-text" id="conversationWorkingText"></span></span>
+              <!-- One row, and the two controls that belong to what it says
+                   sit at its right end: the mode the next message goes out
+                   under, and what to do about a turn in flight. That takes
+                   them out of the row below, which on a phone was a whole
+                   line of its own for three buttons. -->
+              <div class="conversation-statusline">
+                <span class="conversation-working" id="conversationWorking" data-working="false"><span
+                      class="conversation-working-text" id="conversationWorkingText"></span></span>
+                <button type="button" class="btn-surface btn-lift conversation-mode" id="conversationMode" hidden></button>
+                <button type="button" class="btn-surface btn-lift conversation-stop" id="conversationStop" hidden>Stop</button>
+              </div>
               <!-- What is attached to the draft. The field carries a
                    placeholder rather than the path - the path is what gets
                    SENT (Claude Code reads an image from one), and it is
@@ -273,8 +282,6 @@
                         placeholder="Message the session…" aria-label="Message the session"></textarea>
               <div class="conversation-actions">
                 <button type="button" class="btn-quiet conversation-attach" id="conversationAttach" aria-label="Attach an image" title="Attach an image"><svg class="icon-symbol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="11" height="9" rx="1"/><circle cx="6" cy="6.5" r="1"/><path d="M3 11l3-3 2.5 2.5L11 8l2 2"/></svg></button>
-                <button type="button" class="btn-surface btn-lift conversation-mode" id="conversationMode" hidden></button>
-                <button type="button" class="btn-surface btn-lift conversation-stop" id="conversationStop" hidden>Stop</button>
                 <button type="submit" class="btn-accent conversation-send" id="conversationSend">Send</button>
               </div>
             </form>
