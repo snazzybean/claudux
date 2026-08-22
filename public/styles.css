@@ -4412,6 +4412,21 @@ button { cursor: pointer; }
 .conversation-working {
   flex: 0 0 100%;
   font-size: var(--fs-ui);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The line keeps its height while it has nothing to say, which is the point of
+   it: the conversation above must not jump every time a turn starts and ends.
+   A no-break space rather than a min-height, so the reserved height is exactly
+   one line of this font whatever the scale says. */
+.conversation-working:empty::before { content: '\00a0'; }
+/* Only while a turn is in flight: the cone of light this view already runs
+   across a working session's title in the sidebar, at its cadence. Afterwards
+   the same line says how long it took, and then it is a fact rather than
+   something in progress. */
+.conversation-working[data-working="true"] {
   background-image: linear-gradient(
     100deg,
     var(--text-muted) 35%,
@@ -4424,12 +4439,11 @@ button { cursor: pointer; }
   color: transparent;
   animation: shimmer 2.4s linear infinite;
 }
-.conversation-working[hidden] { display: none; }
 /* The global reduced-motion rule only shortens the duration, which would
-   freeze the gradient mid-sweep and leave the word half muted. Its own way
+   freeze the gradient mid-sweep and leave the words half muted. Its own way
    out, as the two rules above it have. */
 @media (prefers-reduced-motion: reduce) {
-  .conversation-working {
+  .conversation-working[data-working="true"] {
     animation: none;
     background-image: none;
     color: var(--text-muted);

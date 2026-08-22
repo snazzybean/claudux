@@ -235,14 +235,20 @@
             <div class="conversation-dialog" id="conversationDialog" hidden></div>
             <div class="conversation-queue" id="conversationQueue" role="group" aria-label="Messages waiting in the queue" hidden></div>
             <form class="conversation-composer" id="conversationComposer">
-              <!-- That the session is producing something is otherwise only
-                   visible in the terminal tab, which is the one you are not
-                   looking at while you read here. Above the field rather than
-                   among the buttons: a word between three controls reads as a
-                   disabled fourth one. `busy` only: a session holding a box
-                   open is `waiting`, and the card is already the sign for
-                   that. -->
-              <span class="conversation-working" id="conversationWorking" role="status" hidden>working</span>
+              <!-- Claude Code's own status line, mirrored from the pane -
+                   what it is doing and for how long, then how long it took.
+                   Otherwise that is visible only in the terminal tab, which is
+                   the one you are not looking at while you read here.
+
+                   Above the field rather than among the buttons: a word
+                   between three controls reads as a disabled fourth one. And
+                   always present, its height reserved while empty, so the
+                   conversation does not jump each time a turn starts.
+
+                   No `role="status"`: the elapsed time in it changes every
+                   tick, and a live region would read that out for as long as
+                   the turn lasts. -->
+              <span class="conversation-working" id="conversationWorking" data-working="false"></span>
               <textarea class="conversation-input" id="conversationInput" rows="1"
                         placeholder="Message the session…" aria-label="Message the session"></textarea>
               <div class="conversation-actions">

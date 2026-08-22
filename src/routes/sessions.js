@@ -19,6 +19,7 @@ import {
 } from '../lib/tmuxManager.js';
 import { sanitizePaneText } from '../lib/paneText.js';
 import { readDialog, promptIsEmpty } from '../lib/paneDialog.js';
+import { readPaneStatus } from '../lib/paneStatus.js';
 import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch, claudeSessionIdsForTmux } from '../lib/sessionMeta.js';
 import { chooseTranscript } from '../lib/contextUsage.js';
 import { subagentsDirFor, AGENT_ID_RE } from '../lib/subagentWatcher.js';
@@ -416,7 +417,13 @@ export function sessionsRouter(config) {
       // src/ is the half that has tests - the browser must not interpret
       // terminal text itself. Same request as the text view, so a client
       // that needs one of the three pays for one round trip.
-      res.json({ raw, clean, dialog: readDialog(clean), promptEmpty: promptIsEmpty(clean) });
+      res.json({
+        raw,
+        clean,
+        dialog: readDialog(clean),
+        promptEmpty: promptIsEmpty(clean),
+        status: readPaneStatus(clean),
+      });
     } catch (err) {
       next(err);
     }

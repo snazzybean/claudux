@@ -1808,13 +1808,22 @@ function renderQueue(state) {
 // the one of the four states that means the session is producing. The label
 // says what Escape does with a queue, because it reaches further than the word
 // "stop" suggests.
+// Claude Code's own status line, mirrored from the pane: it says what it is
+// doing and for how long, in its own words, and afterwards how long it took.
+// A line the app wrote itself could only ever say less.
+//
+// Always there, never hidden: the height is reserved even while the text is
+// empty, so the conversation above does not jump every time a turn starts and
+// ends. An absent reading leaves the last line standing rather than blanking
+// it - the same rule the card follows for a read that failed.
+function renderStatus(status) {
+  conversationWorkingEl.textContent = status?.text ?? '';
+  conversationWorkingEl.dataset.working = status?.working ? 'true' : 'false';
+}
+
 function renderStop(state) {
   const waiting = waitingOf(state);
-  // One expression for both, for the same reason isBusy has one reader: two
-  // copies would drift and then disagree about whether anything is running.
-  const running = Boolean(state) && !state.gone && isBusy();
-  conversationStopEl.hidden = !running;
-  conversationWorkingEl.hidden = !running;
+  conversationStopEl.hidden = !state || state.gone || !isBusy();
   conversationStopEl.textContent = waiting.length ? 'Stop · sends the queue' : 'Stop';
   conversationStopEl.dataset.queued = waiting.length ? 'true' : 'false';
 }
@@ -2289,7 +2298,12 @@ async function readPaneDialog(carrier) {
     const pane = await res.json();
     // An absent key reads as "no box open", the same way refuseSend takes it:
     // an older server without the field must not put a card on the screen.
-    return { dialog: pane.dialog ?? { open: false, options: [], mirrored: '' } };
+    return {
+      dialog: pane.dialog ?? { open: false, options: [], mirrored: '' },
+      // `null` is an answer (an idle pane says nothing), `undefined` is not -
+      // an older server without the field must leave the line as it stands.
+      status: 'status' in pane ? pane.status : undefined,
+    };
   } catch {
     return {};
   }
@@ -2338,6 +2352,9 @@ async function refreshDialog() {
     // for one missed tick would be worse than the tick. A session that has
     // gone away is reported by the transcript read instead, which has the more
     // careful rule for saying so - and which runs on the same tick.
+    // Before the early return below: a read that came back without a dialog
+    // still came back, and the line has nothing to do with the card.
+    if (pane.status !== undefined) renderStatus(pane.status);
     if (!pane.dialog) return;
     state.dialog = pane.dialog;
     if ('held' in hook) state.held = hook.held;
