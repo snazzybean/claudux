@@ -199,6 +199,98 @@ function todoListNode(todos) {
   return list;
 }
 
+// ---------- a subagent's own conversation ----------
+
+// Fetched on the first open and kept: a transcript runs to tens of kilobytes
+// and most cards are never opened. Keeping it is worth something only
+// because the node survives a poll - syncStream reuses it as long as the
+// event's mark is unchanged, which is what contentMark below is about.
+//
+// The answer says whether it may be kept. One thing in it can still change:
+// a nested card whose transcript is not on disk yet. Nothing re-reads a
+// loaded body, so that one goes unlatched and the next open asks again - an
+// unattributable one does not, since no later write settles it.
+async function loadAgentBlocks(carrier, agentId, target) {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/agents/${encodeURIComponent(agentId)}`);
+  if (carrierOf(session) !== carrier) return false;
+  // The meta file that names the agent is written before its transcript, so
+  // there is a moment in which the card is offered and the file is not there.
+  if (res.status === 404) {
+    target.replaceChildren(noteNode('This subagent has not written anything yet.'));
+    return false;
+  }
+  const data = await (await checkResponse(res)).json();
+  if (carrierOf(session) !== carrier) return false;
+  target.replaceChildren(...data.blocks.map(agentBlockNode));
+  // Only a spawning call carries the key at all, and only an unresolved one
+  // carries it as null.
+  return data.blocks.every((block) => block.agentId !== null || block.agentAmbiguous);
+}
+
+function toolLineNode(text) {
+  const line = document.createElement('div');
+  line.className = 'conversation-agent-block conversation-agent-tool';
+  line.textContent = text;
+  return line;
+}
+
+function agentBlockNode(block) {
+  if (block.kind === 'text') {
+    const body = markdownNode(block.html);
+    body.classList.add('conversation-agent-block');
+    return body;
+  }
+  const title = `${block.name}${block.detail ? ` · ${block.detail}` : ''}`;
+  if (block.agentId === undefined) {
+    return toolLineNode([title, block.result].filter(Boolean).join('\n'));
+  }
+  // A call that spawned an agent of its own, and the only place one can be
+  // reached from: the spawning call of a nested agent stands in this
+  // transcript and in no other, the session's own included.
+  const card = agentCard({ ...block, description: block.detail, name: block.agentName });
+  // What the agent handed back to its caller, beside the card rather than
+  // inside it - the card holds the agent's own conversation, and this is the
+  // one line of it addressed to the transcript around it.
+  if (!block.result) return card;
+  const pair = document.createDocumentFragment();
+  pair.append(card, toolLineNode(block.result));
+  return pair;
+}
+
+// Flat and unopenable where the server could not name a transcript, and it
+// says which of the two reasons it was: nothing on disk answers to this call,
+// or several do. The second is not the absence of a transcript, so it must
+// not read as one. A foldout onto nothing would be worse than either - it
+// says there is something to see.
+function agentCard({ agentId, agentAmbiguous, agentType, description, name }) {
+  const title = ['Subagent', agentType, name, description].filter(Boolean).join(' · ');
+  if (!agentId) {
+    return noteNode(agentAmbiguous
+      ? `${title} - several agents ran under this name; which one this is is not on disk.`
+      : `${title} - no transcript on disk names this one.`);
+  }
+  // Taken now rather than when the card is opened: the card was rendered
+  // into one session's stream and belongs to it, whatever is on screen by
+  // the time a finger reaches it.
+  const carrier = carrierOf(session);
+  const body = document.createElement('div');
+  body.className = 'conversation-agent-blocks';
+  const card = foldout(title, body);
+  card.addEventListener('toggle', () => {
+    // `loading` as well as `loaded`, because the latch is only set once an
+    // answer is in: open-shut-open in quick succession would otherwise put
+    // two requests on the way for the same body.
+    if (!card.open || body.dataset.loaded === 'true' || body.dataset.loading === 'true') return;
+    body.dataset.loading = 'true';
+    body.replaceChildren(noteNode('Loading…'));
+    loadAgentBlocks(carrier, agentId, body)
+      .then((keep) => { if (keep) body.dataset.loaded = 'true'; })
+      .catch((err) => body.replaceChildren(noteNode(err.message)))
+      .finally(() => { delete body.dataset.loading; });
+  });
+  return card;
+}
+
 function eventNode(event) {
   const node = document.createElement('div');
   node.className = `conversation-event conversation-${event.kind}`;
@@ -219,8 +311,7 @@ function eventNode(event) {
   } else if (event.kind === 'image') {
     node.append(noteNode('Image attached'));
   } else if (event.kind === 'task') {
-    const parts = ['Subagent', event.agentType, event.description].filter(Boolean);
-    node.append(noteNode(parts.join(' · ')));
+    node.append(agentCard(event));
   } else if (event.kind === 'todos') {
     node.append(todoListNode(event.todos));
   }
@@ -372,8 +463,18 @@ function emptyNotice(state) {
 // as soon as that call is paged in, and the events after it shift one place
 // up - so a text turn would otherwise be able to reuse the node of a tool
 // card, or of the turn before it.
+// The agent id is part of it because it arrives late: the meta file that
+// names a subagent's transcript is written a moment after the line that
+// spawned it, so the first render of a card is regularly the one that cannot
+// open. Only a rebuild turns it into one that can, and nothing is lost -
+// what it replaces is a card with nothing in it.
+//
+// And the ambiguity beside it, because a card can move from one closed state
+// to the other with the id staying null the whole way: a second agent of the
+// same name appearing turns "nothing has been written" into "cannot be
+// attributed", and without this the card would keep the first sentence.
 function contentMark(event) {
-  return `${event.kind}|${event.resultLoaded ? 1 : 0}|${(event.result ?? '').length}|${(event.html ?? '').length}`;
+  return `${event.kind}|${event.resultLoaded ? 1 : 0}|${(event.result ?? '').length}|${(event.html ?? '').length}|${event.agentId ?? ''}|${event.agentAmbiguous ? 1 : 0}`;
 }
 
 // The dom brought in line with state.events, node by node, instead of

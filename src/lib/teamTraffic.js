@@ -46,6 +46,8 @@ export function createTrafficTracker() {
         if (!Array.isArray(content)) continue;
         for (const part of content) {
           if (part?.type !== 'tool_use') continue;
+          // `Agent` only, unlike SPAWN_TOOLS in agentTranscript.js: a spawn
+          // under a NAME never existed while the tool was still called Task.
           const name = part.name === 'Agent' ? part.input?.name : (part.name === 'SendMessage' ? part.input?.to : null);
           if (typeof name === 'string' && name !== LEAD) names.add(name);
         }

@@ -85,3 +85,60 @@ test('readAgentBlocks reports no blocks for a transcript that has not grown', ()
   const { offset } = readAgentBlocks(file, 0);
   assert.deepEqual(readAgentBlocks(file, offset).blocks, []);
 });
+
+// A nested agent's spawning call is in its PARENT's transcript, never in the
+// session's own - so this is the only place a card for one can be offered.
+// Its files sit in the same directory, which is what makes the lookup the
+// same one.
+test('readAgentBlocks names the transcript of an agent this one spawned', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-at-'));
+  const file = path.join(dir, 'agent-aparent111.jsonl');
+  fs.writeFileSync(file, line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_01AAA', name: 'Agent', input: { description: 'dig deeper', subagent_type: 'Explore' } }] } }));
+  fs.writeFileSync(path.join(dir, 'agent-anested222.meta.json'), JSON.stringify({ agentType: 'Explore', toolUseId: 'toolu_01AAA', parentAgentId: 'aparent111', spawnDepth: 2 }));
+  const [block] = readAgentBlocks(file, 0).blocks;
+  assert.equal(block.kind, 'tool');
+  assert.equal(block.agentId, 'anested222');
+});
+
+// The session's cards resolve by name as well; a nested one has to, or a
+// teammate started inside an agent could never be opened.
+test('readAgentBlocks names a nested agent that ran under a name', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-at-'));
+  const file = path.join(dir, 'agent-aparent111.jsonl');
+  fs.writeFileSync(file, line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_01AAA', name: 'Agent', input: { description: 'dig deeper', subagent_type: 'Explore', name: 'digger' } }] } }));
+  fs.writeFileSync(path.join(dir, 'agent-adigger-2222.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'dig deeper', name: 'digger' }));
+  const [block] = readAgentBlocks(file, 0).blocks;
+  assert.equal(block.agentName, 'digger');
+  assert.equal(block.agentType, 'Explore');
+  assert.equal(block.agentId, 'adigger-2222');
+});
+
+// The card shows a different sentence for "several ran under this name" than
+// for "nothing on disk names this call".
+test('readAgentBlocks marks a nested name several agents ran under', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-at-'));
+  const file = path.join(dir, 'agent-aparent111.jsonl');
+  fs.writeFileSync(file, line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_01AAA', name: 'Agent', input: { description: 'dig deeper', name: 'digger' } }] } }));
+  for (const id of ['adigger-1111', 'adigger-2222']) {
+    fs.writeFileSync(path.join(dir, `agent-${id}.meta.json`), JSON.stringify({ agentType: 'Explore', description: 'dig deeper', name: 'digger' }));
+  }
+  const [block] = readAgentBlocks(file, 0).blocks;
+  assert.equal(block.agentId, null);
+  assert.equal(block.agentAmbiguous, true);
+});
+
+test('readAgentBlocks leaves a spawning call unnamed when no meta claims it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-at-'));
+  const file = path.join(dir, 'agent-aparent111.jsonl');
+  fs.writeFileSync(file, line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_01AAA', name: 'Task', input: { description: 'dig deeper' } }] } }));
+  assert.equal(readAgentBlocks(file, 0).blocks[0].agentId, null);
+});
+
+test('readAgentBlocks puts no agent id on an ordinary tool call', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudux-at-'));
+  const file = path.join(dir, 'agent-aparent111.jsonl');
+  fs.writeFileSync(file, line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_01AAA', name: 'Bash', input: { command: 'ls' } }] } }));
+  const [block] = readAgentBlocks(file, 0).blocks;
+  assert.equal(block.agentId, undefined);
+  assert.equal(block.agentType, undefined);
+});

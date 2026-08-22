@@ -78,7 +78,7 @@ export function currentToolFromAgentTranscript(jsonlText) {
 }
 
 export const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
-const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
+export const AGENT_META_RE = /^agent-([a-zA-Z0-9_-]+)\.meta\.json$/;
 
 // A nested agent's tool_result lands in the transcript of the AGENT that
 // spawned it, so that file has to be read for it. Null when there is no

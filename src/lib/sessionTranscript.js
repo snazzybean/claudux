@@ -3,6 +3,7 @@
 // condenses for a 200px window (no thinking, results cut at 600 chars),
 // which are the wrong calls for a page you read.
 import { renderMarkdown } from './fileRender.js';
+import { toolDetail } from './toolDetail.js';
 
 // A tool result can be megabytes. Four times what a subagent window shows,
 // because here it is the content, not a hint.
@@ -35,10 +36,6 @@ const SKIP_TYPES = new Set([
   'attachment', 'summary',
 ]);
 
-// The argument worth showing per tool, in the order Claude Code's own tools
-// name them. Same idea as agentTranscript.js.
-const DETAIL_KEYS = ['command', 'file_path', 'pattern', 'path', 'url', 'description'];
-
 // A plain slice() can cut a surrogate pair in half at the boundary, leaving
 // a lone high surrogate at the end of the string. Back off by one code unit
 // when that happens instead.
@@ -50,13 +47,7 @@ function capText(text, max) {
   return text.slice(0, end);
 }
 
-function detailOf(input) {
-  if (!input || typeof input !== 'object') return '';
-  for (const key of DETAIL_KEYS) {
-    if (typeof input[key] === 'string') return capText(input[key], MAX_DETAIL_CHARS);
-  }
-  return '';
-}
+const detailOf = (input) => capText(toolDetail(input), MAX_DETAIL_CHARS);
 
 // A tool_result's content is a string for most tools and an array of blocks
 // for the ones that can return an image.
@@ -107,11 +98,15 @@ function pushPart(events, byToolUseId, entry, part) {
     events.push({ kind: 'image', ...base(entry) });
   } else if (part?.type === 'tool_use' && typeof part.name === 'string') {
     const toolUseId = typeof part.id === 'string' ? part.id : null;
-    if (part.name === 'Task') {
+    // Both names: the tool that spawns an agent has been renamed.
+    if (part.name === 'Task' || part.name === 'Agent') {
       events.push({
         kind: 'task', ...base(entry), toolUseId,
         agentType: typeof part.input?.subagent_type === 'string' ? part.input.subagent_type : '',
         description: typeof part.input?.description === 'string' ? part.input.description : '',
+        // A named agent is on disk under its name and no call id, which is
+        // the only link left to its transcript (see subagentIndex.js).
+        name: typeof part.input?.name === 'string' ? part.input.name : '',
       });
     } else if (part.name === 'TodoWrite') {
       events.push({

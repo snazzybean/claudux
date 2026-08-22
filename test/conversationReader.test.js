@@ -386,3 +386,122 @@ test('windowed reads lose nothing and hide no more than a whole-file read', () =
     assert.ok(wholeDropped.has(uuid), `${uuid} is hidden by the whole-file read too`);
   }
 });
+
+// ---------- which agent transcript a subagent card can open ----------
+
+// The link only exists in the meta files beside the agent transcripts, and
+// this is the only layer that holds both the events and the path they came
+// from.
+function withSubagents(body, metas) {
+  const file = transcript(body);
+  const dir = path.join(path.dirname(file), SESSION, 'subagents');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [agentId, meta] of Object.entries(metas)) {
+    fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta));
+  }
+  return file;
+}
+
+const spawn = (uuid, toolUseId, input) =>
+  line({ type: 'assistant', uuid, parentUuid: null, message: { content: [{ type: 'tool_use', id: toolUseId, name: 'Agent', input }] } });
+
+test('readConversation names the agent transcript a subagent card can open', () => {
+  const file = withSubagents(
+    spawn('a', 'toolu_01AAA', { subagent_type: 'Explore', description: 'look around' }),
+    { a0011aa22bb33cc44: { agentType: 'Explore', toolUseId: 'toolu_01AAA' } },
+  );
+  const [event] = readConversation(file, { tail: true }).events;
+  assert.equal(event.kind, 'task');
+  assert.equal(event.agentId, 'a0011aa22bb33cc44');
+});
+
+test('readConversation names a teammate transcript through the name it ran under', () => {
+  const file = withSubagents(
+    spawn('a', 'toolu_01AAA', { subagent_type: 'general-purpose', description: 'measure', name: 'probe-run' }),
+    { 'aprobe-run-9988': { agentType: 'general-purpose', description: 'measure', name: 'probe-run', teamName: 'session-abc' } },
+  );
+  const [event] = readConversation(file, { tail: true }).events;
+  assert.equal(event.agentId, 'aprobe-run-9988');
+  assert.equal(event.agentAmbiguous, false);
+});
+
+// "Nothing on disk names this call" and "several do" are different answers,
+// and the card says a different sentence for each.
+test('readConversation marks a card whose name several agents ran under', () => {
+  const file = withSubagents(
+    spawn('a', 'toolu_01AAA', { subagent_type: 'general-purpose', description: 'measure', name: 'twin' }),
+    {
+      'atwin-1111': { agentType: 'general-purpose', description: 'measure', name: 'twin' },
+      'atwin-2222': { agentType: 'general-purpose', description: 'measure', name: 'twin' },
+    },
+  );
+  const [event] = readConversation(file, { tail: true }).events;
+  assert.equal(event.agentId, null);
+  assert.equal(event.agentAmbiguous, true);
+});
+
+// The name is on disk but this call is not the one that produced it. There
+// IS a transcript under that name, so the card must say "cannot be
+// attributed" and not "nothing was written".
+test('readConversation refuses a second call under a name only one meta answers to', () => {
+  const file = withSubagents(
+    spawn('a', 'toolu_01AAA', { subagent_type: 'general-purpose', description: 'the first errand', name: 'twin' })
+    + spawn('b', 'toolu_01BBB', { subagent_type: 'general-purpose', description: 'a second errand', name: 'twin' }),
+    { 'atwin-1111': { agentType: 'general-purpose', description: 'the first errand', name: 'twin' } },
+  );
+  const events = readConversation(file, { tail: true }).events;
+  assert.deepEqual(events.map((e) => e.agentId), ['atwin-1111', null]);
+  assert.equal(events[1].agentAmbiguous, true);
+});
+
+// Identical calls against a single file on disk: one of them may have
+// written it and nothing says which, so none of them may open it.
+test('readConversation refuses identical calls that face a single meta', () => {
+  const body = spawn('a', 'toolu_01AAA', { subagent_type: 'general-purpose', description: 'measure', name: 'twin' })
+    + spawn('b', 'toolu_01BBB', { subagent_type: 'general-purpose', description: 'measure', name: 'twin' });
+  const file = withSubagents(body, { 'atwin-1111': { agentType: 'general-purpose', description: 'measure', name: 'twin' } });
+  const events = readConversation(file, { tail: true }).events;
+  assert.deepEqual(events.map((e) => e.agentId), [null, null]);
+  assert.deepEqual(events.map((e) => e.agentAmbiguous), [true, true]);
+});
+
+// And the count has to come from the whole file: a window holding one of the
+// two would otherwise call it unique and open someone else's conversation.
+test('readConversation counts the calls over the file, not over the window', () => {
+  const first = spawn('a', 'toolu_01AAA', { subagent_type: 'general-purpose', description: 'measure', name: 'twin' });
+  const file = withSubagents(
+    first + spawn('b', 'toolu_01BBB', { subagent_type: 'general-purpose', description: 'measure', name: 'twin' }),
+    { 'atwin-1111': { agentType: 'general-purpose', description: 'measure', name: 'twin' } },
+  );
+  const window = readConversation(file, { before: Buffer.byteLength(first) });
+  assert.deepEqual(window.events.map((e) => e.uuid), ['a']);
+  assert.equal(window.events[0].agentId, null);
+  assert.equal(window.events[0].agentAmbiguous, true);
+});
+
+// Nothing on disk says which spawn a card belongs to, so the card has to say
+// so rather than open one of them.
+test('readConversation leaves the agent unnamed when nothing on disk identifies it', () => {
+  const file = withSubagents(
+    spawn('a', 'toolu_01AAA', { subagent_type: 'Explore', description: 'look around' }),
+    { a0011: { agentType: 'Explore', toolUseId: 'toolu_01ZZZ' } },
+  );
+  assert.equal(readConversation(file, { tail: true }).events[0].agentId, null);
+});
+
+// The agent's meta is written after the line that spawned it, so the first
+// window regularly carries a card the next one can resolve.
+test('readConversation resolves an agent that appeared after the first read', () => {
+  const file = withSubagents(spawn('a', 'toolu_01AAA', { subagent_type: 'Explore', description: 'look around' }), {});
+  assert.equal(readConversation(file, { tail: true }).events[0].agentId, null);
+  fs.writeFileSync(
+    path.join(path.dirname(file), SESSION, 'subagents', 'agent-a0011.meta.json'),
+    JSON.stringify({ agentType: 'Explore', toolUseId: 'toolu_01AAA' }),
+  );
+  assert.equal(readConversation(file, { tail: true }).events[0].agentId, 'a0011');
+});
+
+test('readConversation puts no agent id on an event that is not a subagent card', () => {
+  const file = transcript(turn('a', null, 'hi'));
+  assert.equal(readConversation(file, { tail: true }).events[0].agentId, undefined);
+});

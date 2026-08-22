@@ -91,6 +91,35 @@ test('conversationEvents turns a Task call into a subagent event', () => {
   assert.equal(event.description, 'find the callers');
 });
 
+// The tool that spawns a subagent was renamed. Both names have to reach the
+// same event, or a card appears for one of them only.
+test('conversationEvents reads Task and Agent as the same subagent event', () => {
+  const spawn = (name) => line({ type: 'assistant', uuid: 'a3', parentUuid: null, entrypoint: 'cli',
+    message: { content: [{ type: 'tool_use', id: 'toolu_3', name,
+      input: { subagent_type: 'Explore', description: 'find the callers' } }] } });
+  const [fromAgent] = conversationEvents(spawn('Agent'));
+  assert.equal(fromAgent.kind, 'task');
+  assert.equal(fromAgent.agentType, 'Explore');
+  assert.equal(fromAgent.toolUseId, 'toolu_3');
+  assert.deepEqual(conversationEvents(spawn('Task')), [fromAgent]);
+});
+
+// A teammate spawned under a name gets no call id in its meta file, so the
+// name is the only thing that can lead from this event to its transcript.
+test('conversationEvents carries the name a teammate was spawned under', () => {
+  const jsonl = line({ type: 'assistant', uuid: 'a3', parentUuid: null, entrypoint: 'cli',
+    message: { content: [{ type: 'tool_use', id: 'toolu_3', name: 'Agent',
+      input: { subagent_type: 'general-purpose', description: 'measure it', name: 'probe-run' } }] } });
+  assert.equal(conversationEvents(jsonl)[0].name, 'probe-run');
+});
+
+test('conversationEvents leaves the name empty for an unnamed subagent', () => {
+  const jsonl = line({ type: 'assistant', uuid: 'a3', parentUuid: null, entrypoint: 'cli',
+    message: { content: [{ type: 'tool_use', id: 'toolu_3', name: 'Agent',
+      input: { subagent_type: 'Explore', description: 'find the callers' } }] } });
+  assert.equal(conversationEvents(jsonl)[0].name, '');
+});
+
 test('conversationEvents turns TodoWrite into a todos event', () => {
   const jsonl = line({ type: 'assistant', uuid: 'a4', parentUuid: null, entrypoint: 'cli',
     message: { content: [{ type: 'tool_use', id: 'toolu_4', name: 'TodoWrite',

@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readAppendedLines, readWindow } from './jsonlReader.js';
 import { conversationView } from './sessionTranscript.js';
+import { subagentIndex, agentIdFor, spawnCallCounter } from './subagentIndex.js';
+import { subagentsDirFor } from './subagentWatcher.js';
 
 // Half a megabyte: a first screen with room to spare, and a big transcript
 // in steps a reader can follow. Its ceiling is MAX_EVENTS next door - these
@@ -106,6 +108,29 @@ function selectWindow(filePath, size, { wantTail, wantBefore, after, before, win
   return windowAfter(filePath, Math.max(0, after), size);
 }
 
+// Which agent transcript each subagent card may open, resolved here because
+// this is the only layer holding both the events and the path they came
+// from - the module next door is handed text alone, and a route is HTTP
+// only. `null` where the disk does not say, which is a card that stays shut.
+// The directory is only read when a window actually carries a card, so a
+// poll usually pays nothing.
+function nameAgents(filePath, events) {
+  const cards = events.filter((event) => event.kind === 'task');
+  if (cards.length === 0) return;
+  const index = subagentIndex(subagentsDirFor(filePath));
+  // Deferred: the whole transcript is scanned only if a card gets as far as
+  // needing the count, and then once for all of them.
+  const callCounts = spawnCallCounter(filePath);
+  for (const card of cards) {
+    // Two shapes of "cannot open", and the card has to tell them apart:
+    // nothing on disk carries this name, or something does and it cannot be
+    // said which.
+    const { agentId, ambiguous } = agentIdFor(index, callCounts, card);
+    card.agentId = agentId;
+    card.agentAmbiguous = ambiguous;
+  }
+}
+
 export function readConversation(filePath, {
   tail = false, after = null, before = null, anchor = null, windowBytes = TAIL_BYTES,
 } = {}) {
@@ -128,6 +153,7 @@ export function readConversation(filePath, {
   const view = wantTail
     ? conversationView(text)
     : conversationView(text, { anchor: walkFrom, filtered: walkFrom !== null });
+  nameAgents(filePath, view.events);
 
   return {
     events: view.events,

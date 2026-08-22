@@ -4020,6 +4020,39 @@ button { cursor: pointer; }
   max-height: calc(var(--app-height, 100dvh) * 0.4);
   overflow: auto;
 }
+/* A subagent's own conversation, inside the card that opens it. It lives in
+   the foldout body above and so under its ceiling - nothing here is a fourth
+   claim on the panel's height. */
+.conversation-agent-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.conversation-agent-block {
+  font-size: var(--fs-meta);
+  overflow-wrap: anywhere;
+}
+/* `pre-wrap` here and not on the block above: a tool line is assembled with
+   newlines, while a text block is rendered markdown - and there the newlines
+   between the elements would turn into blank lines. */
+.conversation-agent-tool {
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+/* An agent that this one spawned, as a card inside the card. Indented and on
+   a rule, because the nesting is the only thing that says whose conversation
+   it is. */
+.conversation-agent-blocks > details {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+/* And one scroller for the whole nest, the outermost card's - the same
+   reasoning as above, one level further in. */
+.conversation-agent-blocks .conversation-foldout-body {
+  max-height: none;
+  overflow: visible;
+}
 /* Everything the view says about an entry rather than showing of it: a call
    still running, a shortened diff, an attached image. */
 .conversation-note {
