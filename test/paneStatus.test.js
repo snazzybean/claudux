@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readPaneStatus } from '../src/lib/paneStatus.js';
+import { readPaneStatus, readPaneMode } from '../src/lib/paneStatus.js';
 
 // Every line below is verbatim from a real `tmux capture-pane` put through
 // sanitizePaneText - four sessions on this host plus the captures in the
@@ -50,4 +50,30 @@ test('readPaneStatus says nothing rather than guessing on an idle pane', () => {
   assert.equal(readPaneStatus('❯\n▰▱▱ Context 4%\n⏵⏵ auto mode on'), null);
   assert.equal(readPaneStatus(''), null);
   assert.equal(readPaneStatus(null), null);
+});
+
+// The mode lines are verbatim too. The default mode has none at all - the A1
+// capture in paneDialog.test.js was taken with `permission_mode: default` and
+// carries no such line anywhere.
+test('readPaneMode reads the mode off the status bar', () => {
+  const bar = (line) => `some output\n\n❯ \n▰▰▱ Context 21%\n${line}`;
+  assert.equal(readPaneMode(bar('⏵⏵ auto mode on (shift+tab to cycle) · ← for agents')), 'auto');
+  assert.equal(readPaneMode(bar('⏵⏵ accept edits on (shift+tab to cycle) · ← for agents')), 'accept edits');
+  assert.equal(readPaneMode(bar('⏸ plan mode on (shift+tab to cycle)')), 'plan');
+});
+
+// The one line that would fool a looser pattern: it names the modes and the
+// keys without any of them being on.
+test('readPaneMode is not fooled by the tip that names the same keys', () => {
+  const pane = 'output\n⎿  Tip: Hit shift+tab to cycle between manual mode, auto-accept edit mode, and plan mode\n\n❯ \n';
+  assert.equal(readPaneMode(pane), 'manual');
+});
+
+test('readPaneMode calls the mode with no line of its own manual', () => {
+  assert.equal(readPaneMode('output\n\n❯ \n▰▰▱ Context 21%'), 'manual');
+});
+
+test('readPaneMode says nothing for a pane with nothing on it', () => {
+  assert.equal(readPaneMode(''), null);
+  assert.equal(readPaneMode(null), null);
 });

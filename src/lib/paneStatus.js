@@ -32,3 +32,29 @@ export function readPaneStatus(paneText) {
   }
   return null;
 }
+
+// The permission mode, off the same pane. Claude Code states it in its status
+// bar - "auto mode on (shift+tab to cycle)" - and that is the CURRENT one,
+// unlike the transcript, which only records the mode a submitted prompt ran
+// under and so lags behind every switch by a message.
+//
+// The literal " on (shift+tab to cycle)" is what anchors it. A tip line reads
+// "Tip: Hit shift+tab to cycle between manual mode, ..." and would otherwise
+// match; requiring the " on (" in front keeps it out.
+const MODE = new RegExp(`^[ \\t]*${GLYPH}([a-z][a-z ]*?) on \\(shift\\+tab to cycle\\)`);
+
+// No line at all is an answer and not a failure: in its default mode Claude
+// Code draws none, and that mode is the one its own tip line calls "manual".
+// Only a pane with no text at all says nothing - a session that has gone.
+export function readPaneMode(paneText) {
+  const text = String(paneText ?? '');
+  if (!text.trim()) return null;
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const m = lines[i].match(MODE);
+    // "auto mode" -> "auto", while "accept edits" has no such tail to drop:
+    // the badge should say what the terminal says.
+    if (m) return m[1].replace(/ mode$/, '').trim();
+  }
+  return 'manual';
+}

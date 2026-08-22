@@ -4341,9 +4341,6 @@ button { cursor: pointer; }
   font-family: var(--font-mono);
   font-size: var(--fs-meta);
 }
-/* Asked to switch, and the transcript has not confirmed where it landed -
-   a Shift+Tab writes no line, so this stands until the next message does. */
-.conversation-mode[data-stale="true"] { opacity: 0.55; }
 .conversation-todo-list {
   margin: 0;
   padding-left: 1.4em;

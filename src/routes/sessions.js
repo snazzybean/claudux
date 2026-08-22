@@ -19,7 +19,7 @@ import {
 } from '../lib/tmuxManager.js';
 import { sanitizePaneText } from '../lib/paneText.js';
 import { readDialog, promptIsEmpty } from '../lib/paneDialog.js';
-import { readPaneStatus } from '../lib/paneStatus.js';
+import { readPaneStatus, readPaneMode } from '../lib/paneStatus.js';
 import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch, claudeSessionIdsForTmux } from '../lib/sessionMeta.js';
 import { chooseTranscript } from '../lib/contextUsage.js';
 import { subagentsDirFor, AGENT_ID_RE } from '../lib/subagentWatcher.js';
@@ -423,6 +423,7 @@ export function sessionsRouter(config) {
         dialog: readDialog(clean),
         promptEmpty: promptIsEmpty(clean),
         status: readPaneStatus(clean),
+        mode: readPaneMode(clean),
       });
     } catch (err) {
       next(err);

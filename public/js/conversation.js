@@ -76,10 +76,10 @@ function stateFor(carrier) {
       // whether it is gone. Per session for the same reason `pending` is:
       // the box it is reported in is the one element every session shares.
       takeBack: null,
-      // The mode that stood on the badge when the switch was last asked for.
-      // A Shift+Tab leaves no line in the transcript, so this is the only
-      // way the badge can say that what it shows may be out of date.
-      modeAsked: null,
+      // The permission mode as the PANE states it, which is the current one -
+      // the transcript's own value lags a switch by a message (see
+      // renderMode). `null` until the first pane read of this session lands.
+      paneMode: null,
       // The two halves of the card that answers an open box: what the pane
       // says is on screen (readDialog's reading, so the KEYS), and what the
       // hook reported about it (the CONTENT). Both `null` for "not read
@@ -1953,27 +1953,22 @@ function renderStop(state) {
   conversationStopEl.dataset.queued = waiting.length ? 'true' : 'false';
 }
 
-// The mode the transcript names, which is the mode the LAST submitted prompt
-// ran under - a switch writes no line of its own. So after the button has
-// been pressed the badge shows a value that may already be wrong, and it says
-// so by being dimmed until a different one arrives. The terminal's own status
-// line has the current one immediately.
+// Off the pane, where Claude Code states the mode it is IN - the transcript
+// only records the mode a submitted prompt ran under, so it lags every switch
+// by a message. That is what made this badge read as broken: it kept saying
+// "auto" after the button had visibly changed the mode, and no dimming made
+// that honest enough to be useful.
+//
+// The transcript stays as the fallback for the moment before the first pane
+// read of a session has landed; after that the pane always answers, including
+// "manual" for the mode that draws no line of its own.
 function renderMode(state) {
-  const mode = state?.permissionMode ?? null;
+  const mode = state?.paneMode ?? state?.permissionMode ?? null;
   conversationModeEl.hidden = !mode || Boolean(state?.gone);
   if (!mode) return;
-  const stale = state.modeAsked === mode;
   conversationModeEl.textContent = mode;
-  conversationModeEl.dataset.stale = stale ? 'true' : 'false';
-  // "at the last message" in both branches: the keybar's own Shift+Tab can
-  // switch the mode without this view hearing anything, so even unasked the
-  // value is only as current as the last prompt. The attribute carries the one
-  // thing more that is known - that a switch was asked for since.
-  conversationModeEl.title = stale
-    ? `Permission mode at the last message: ${mode}, and a switch has been asked for since. Tap to switch one further.`
-    : `Permission mode at the last message: ${mode}. Tap to switch one further.`;
+  conversationModeEl.title = `Permission mode: ${mode}. Tap to switch one further.`;
   conversationModeEl.setAttribute('aria-label', conversationModeEl.title);
-  if (!stale) state.modeAsked = null;
 }
 
 function renderControls(state) {
@@ -2135,8 +2130,10 @@ conversationModeEl.addEventListener('click', () => {
     showError('The terminal is not ready yet - open the terminal tab once, then try again.');
     return;
   }
-  if (state) state.modeAsked = state.permissionMode;
-  renderMode(state);
+  // Straight away rather than on the next tick: the pane redraws its status bar
+  // in milliseconds, and a badge that takes up to five seconds to follow a tap
+  // is the thing this stopped being.
+  refreshDialog().catch(() => {});
 });
 
 // ---------- the card that answers an open box ----------
@@ -2428,6 +2425,7 @@ async function readPaneDialog(carrier) {
       // `null` is an answer (an idle pane says nothing), `undefined` is not -
       // an older server without the field must leave the line as it stands.
       status: 'status' in pane ? pane.status : undefined,
+      mode: 'mode' in pane ? pane.mode : undefined,
     };
   } catch {
     return {};
@@ -2480,6 +2478,7 @@ async function refreshDialog() {
     // Before the early return below: a read that came back without a dialog
     // still came back, and the line has nothing to do with the card.
     if (pane.status !== undefined) renderStatus(pane.status);
+    if (pane.mode !== undefined) state.paneMode = pane.mode;
     if (!pane.dialog) return;
     state.dialog = pane.dialog;
     if ('held' in hook) state.held = hook.held;
