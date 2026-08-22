@@ -3938,7 +3938,13 @@ button { cursor: pointer; }
 
 .conversation-stream {
   flex: 1 1 auto;
-  min-height: 0;
+  /* A floor, not the `min-height: 0` a flex scroller usually takes: with the
+     keyboard up, a long draft and a full queue box, everything below claims
+     its whole share of --app-height and the transcript is allocated nothing at
+     all - the conversation gone while you write. Any non-auto value keeps the
+     scroller working; this one is proportional for the same reason the two
+     ceilings below are. */
+  min-height: calc(var(--app-height, 100dvh) * 0.15);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -4037,6 +4043,10 @@ button { cursor: pointer; }
    command's own business. Nothing is wrong here, so nothing is marked - only
    the dimming lifts, because the card is done waiting. */
 .conversation-event[data-pending="sent"] { opacity: 0.8; }
+/* Taken back out of the queue from here. Its own state and not the one
+   above: the message is accounted for - it was withdrawn on purpose - so
+   nothing here waits and nothing is wrong. */
+.conversation-event[data-pending="taken"] { opacity: 0.8; }
 /* Nothing came back for it. Class and attribute together outrank
    .conversation-user's accent edge, which is the point: what this card says
    now is that the send is unaccounted for. */
@@ -4052,6 +4062,82 @@ button { cursor: pointer; }
   font-size: var(--fs-meta);
 }
 [data-pending="stale"] .conversation-hint { color: var(--danger); }
+/* What Claude Code has waiting, from the last tail read of the transcript.
+   A strip of its own between the stream and the composer rather than cards
+   in the stream: these have not happened yet, and putting them in the
+   scrolling history would place them among things that did.
+
+   Its own scroller with a ceiling against --app-height, not vh: an entry runs
+   to MAX_QUEUE_CHARS and there can be a good many of them, so unbounded the
+   box would push the composer off the screen - and against the layout viewport
+   it would do exactly that as soon as the keyboard is up. The share is the
+   smallest of the three in this column because it is the one whose absence
+   costs least: that something waits is also on the Stop button. */
+/* `0 0 auto` like everything else in this column, and it has to be: the
+   stream's flex base size is the whole loaded transcript, so the panel is
+   permanently over-subscribed and the flex algorithm hands any sibling with a
+   shrink factor a share of an overflow thousands of pixels deep - such a
+   sibling collapses to nothing, at every height. Which is why the sizes in
+   this column are held apart by their ceilings instead (see the floor on
+   .conversation-stream), and why a fourth item added here has to take its
+   share out of one of them. */
+.conversation-queue {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  /* The line is what separates what was said from what has not been said
+     yet: the box sits directly under the scrolling transcript, and dimmed
+     italics alone read as one more turn in it. */
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-xs);
+}
+/* The ceiling sits on the list and not on the box, so the button below it
+   stays put: over the whole box it cut the button off, and the only control
+   this box has was then reachable only by scrolling inside it. */
+.conversation-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: calc(var(--app-height, 100dvh) * 0.08);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Its own `display: flex` beats the UA's `[hidden]` rule regardless of
+   specificity - the same trap the panel, the composer and the jump button
+   carry. */
+.conversation-queue[hidden] { display: none; }
+/* Away from the end of the conversation the queue is not re-read, so what
+   stands in the box is a picture of an older moment (see renderQueue). */
+.conversation-queue[data-stale="true"] { opacity: 0.55; }
+/* Not yet said, not yet answered: italic and dimmed is what a turn looks
+   like before it is one. `pre-wrap` because this is the message as it was
+   typed - nothing renders a queue entry. */
+.conversation-waiting {
+  opacity: 0.6;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+/* Wider than the row it sits in would make it: it is the only control in
+   this box, and on a phone it is a thumb target rather than a label. */
+.conversation-takeback {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: var(--space-sm);
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+}
+/* The mode the last submitted prompt ran under. Mono because it is a value
+   Claude Code writes, not a word this interface chose - and one size down
+   from Stop beside it, which is an action rather than a reading. */
+.conversation-mode {
+  padding: 9px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+}
+/* Asked to switch, and the transcript has not confirmed where it landed -
+   a Shift+Tab writes no line, so this stands until the next message does. */
+.conversation-mode[data-stale="true"] { opacity: 0.55; }
 .conversation-todo-list {
   margin: 0;
   padding-left: 1.4em;
@@ -4081,9 +4167,16 @@ button { cursor: pointer; }
    specificity - the same trap the panel and the composer carry. */
 .conversation-jump[hidden] { display: none; }
 
+/* Wraps rather than squeezing: with the mode badge and Stop both up, the four
+   controls and the field do not fit a phone's width, and the field is what
+   gives - down to a few characters. Wrapping is decided by the field's own
+   basis instead of by a media query, so the row stays single-line exactly as
+   long as it fits, on any width and with however many controls happen to be
+   visible. */
 .conversation-composer {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-lg);
   align-items: flex-end;
 }
@@ -4091,14 +4184,21 @@ button { cursor: pointer; }
    above - and this one is hidden whenever there is no session to answer. */
 .conversation-composer[hidden] { display: none; }
 .conversation-input {
-  flex: 1 1 auto;
+  /* The basis is what decides the wrap above - below this the controls move
+     to a line of their own instead of taking the width from the field. */
+  flex: 1 1 200px;
   min-width: 0;
   resize: none;
   /* Against --app-height instead of vh, and here it decides the layout: the
      field grows with what is typed, so with the keyboard up a vh ceiling
-     would keep claiming 40% of the FULL screen and leave nothing of the
-     conversation above it. */
-  max-height: calc(var(--app-height, 100dvh) * 0.4);
+     would keep claiming this share of the FULL screen and leave nothing of
+     the conversation above it.
+
+     The share is smaller than it looks because the controls wrap onto a line
+     of their own on a narrow screen, and that line is paid for out of the same
+     --app-height: with the keyboard up, a long draft and a full queue box, a
+     larger share puts the composer past the bottom edge of the app. */
+  max-height: calc(var(--app-height, 100dvh) * 0.3);
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -4113,7 +4213,12 @@ button { cursor: pointer; }
 /* Calmer than the global focus ring, for the same reason .search-input
    replaces it: an outline around a field this size reads as a halo. */
 .conversation-input:focus-visible { outline: none; border-color: var(--accent); }
+/* Never shrinks - the field is what gives way, and then wraps. `margin-left`
+   keeps Send against the right edge in both layouts: beside the field, and on
+   a line of its own below it. */
 .conversation-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
   display: flex;
   gap: var(--space-md);
   align-items: center;

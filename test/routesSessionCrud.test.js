@@ -541,8 +541,9 @@ test('POST /api/sessions/:id/resume attaches to the running tmux session instead
 });
 
 // Text view for selecting text on the phone: returns the visible pane
-// content raw and cleaned up (see paneText.js). Runs, like the other tmux
-// tests in this file, against the real, shared tmux server of the host.
+// content raw and cleaned up (see paneText.js), plus what paneDialog.js
+// reads off the cleaned text. Runs, like the other tmux tests in this file,
+// against the real, shared tmux server of the host.
 test('GET /api/sessions/:id/pane returns the visible pane content raw and cleaned up', async () => {
   const { spawnTmux, waitForSession } = await import('../src/lib/tmuxManager.js');
   const name = crypto.randomUUID();
@@ -568,6 +569,15 @@ test('GET /api/sessions/:id/pane returns the visible pane content raw and cleane
       body.clean,
       body.clean.split('\n').map((line) => line.replace(/\s+$/, '')).join('\n'),
     );
+    // Both readings of the same pane travel with it, so the browser never
+    // has to interpret terminal text itself: what the session is asking,
+    // and whether its input line is empty. This pane is a bare `sleep`, so
+    // there is no dialog and no prompt line at all - and no prompt line is
+    // deliberately NOT an empty one (see promptIsEmpty): every guard built
+    // on it errs towards refusing. What the two readings do with real box
+    // shapes is pinned in test/paneDialog.test.js against nine captures.
+    assert.deepEqual(body.dialog, { open: false, options: [], mirrored: '' });
+    assert.equal(body.promptEmpty, false);
   } finally {
     server.close();
     await killSession(name).catch(() => {});

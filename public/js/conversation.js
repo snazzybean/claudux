@@ -12,6 +12,8 @@ import {
   conversationComposerEl,
   conversationInputEl,
   conversationAttachEl,
+  conversationStopEl,
+  conversationModeEl,
 } from './dom.js';
 import { checkResponse, showError, showToast } from './messages.js';
 import { fillAlertIcons } from './icons.js';
@@ -63,6 +65,14 @@ function stateFor(carrier) {
       // hang in the one stream element every session shares, and a switch has
       // to take them off the screen without losing them.
       pending: [],
+      // The queue entry a take-back was aimed at, until a tail read shows
+      // whether it is gone. Per session for the same reason `pending` is:
+      // the box it is reported in is the one element every session shares.
+      takeBack: null,
+      // The mode that stood on the badge when the switch was last asked for.
+      // A Shift+Tab leaves no line in the transcript, so this is the only
+      // way the badge can say that what it shows may be out of date.
+      modeAsked: null,
       // Whether the route still knows this session. It belongs here and not
       // on the composer's `hidden`, because three places set that flag and
       // only one of them can find this out: entering the tab decides from
@@ -301,11 +311,22 @@ export function noteSessionStatus({ tmuxSession, sessionId, state }) {
 }
 
 // `busy` is the only one of the four that means "producing". `waiting` and
-// `idle` both wait on a person, `shell` on a background command.
-function pollWait() {
+// `idle` both wait on a person, `shell` on a background command. The row's
+// own collapsed activity is the fallback until the first change arrives, and
+// it is a snapshot from when this tab was entered - which is why it comes
+// last.
+//
+// One reader for both the poll cadence and the Stop button: two copies of
+// this expression would drift, and they would then disagree about whether
+// the session is producing anything.
+function isBusy() {
   const raw = statusById.get(carrierOf(session)) ?? statusById.get(session?.id);
-  if (raw) return raw === 'busy' ? BUSY_MS : IDLE_MS;
-  return session?.activity === 'working' ? BUSY_MS : IDLE_MS;
+  if (raw) return raw === 'busy';
+  return session?.activity === 'working';
+}
+
+function pollWait() {
+  return isBusy() ? BUSY_MS : IDLE_MS;
 }
 
 // `keep` is what stays under the notice, and it is passed in rather than
@@ -555,8 +576,16 @@ async function loadTail({ first = true } = {}) {
     state.tailAt = Date.now();
     reconcilePending(state, readAt);
     // Only a tail read carries the queue, and it is the other place a sent
-    // message can turn up.
+    // message can turn up. settleTakeBack goes after it, not before: the card
+    // has to see the withdrawal that markQueued turns into its own sentence.
     markQueued(state);
+    settleTakeBack(state, readAt);
+    // Before the render, not after: the mode badge and the queue box change
+    // the height of what sits below the transcript, and on a narrow screen
+    // the badge appearing is what moves the composer onto a second row. That
+    // height comes off the stream, so a render that scrolls to the end first
+    // and loses it afterwards opens the view short of the end.
+    renderControls(state);
     render(state, { scroll: first ? 'end' : 'follow' });
   } finally {
     state.reading = false;
@@ -710,6 +739,11 @@ function pollNow() {
   clearTimeout(timer);
   timer = null;
   if (!session) return;
+  // Before the read, and on every tick: what Stop shows comes off the event
+  // stream, and the box has a lateness of its own to report - neither waits
+  // for an answer, and poll() has several paths that return without one.
+  const carrier = carrierOf(session);
+  if (carrier) renderControls(stateFor(carrier));
   poll().catch(() => {}).finally(schedule);
 }
 
@@ -770,6 +804,11 @@ conversationStreamEl.addEventListener('scroll', () => {
   if (Date.now() < ownScrollUntil) return;
   stickToBottom = atBottom();
   if (stickToBottom) hideJump();
+  // Leaving the end is what makes the queue box a picture of an older
+  // moment, so it is redrawn here rather than waiting for the next tick -
+  // and only when that actually changed, since a scroll fires per frame.
+  const state = stateBySession.get(carrierOf(session));
+  if (state && queueActionable !== null && queueActionable !== queueIsActionable(state)) renderQueue(state);
   if (conversationStreamEl.scrollTop < TOP_TRIGGER) loadOlder().catch(() => {});
 });
 
@@ -783,13 +822,21 @@ export function showConversation(nextSession) {
   session = nextSession;
   conversationPanelEl.hidden = false;
   conversationDialogEl.hidden = true;
-  conversationQueueEl.hidden = true;
   // Entering the tab means following again: the view opens at the end, so
   // there is nothing left to jump to.
   stickToBottom = true;
   hideJump();
+  // The Stop lockout belongs to the session that received the Escape. Left
+  // standing, the first tap on the next session would be answered with
+  // "already sent" about an interrupt that session never got.
+  stopSentAt = 0;
   const carrier = carrierOf(session);
   const state = carrier ? stateFor(carrier) : null;
+  // Before the branch below and with a null state too, so no session's queue,
+  // Stop or mode is left standing over the next one - all three read the
+  // state and hide themselves when there is none. One writer, like the
+  // composer beside them.
+  renderControls(state);
   // From the state, never from the carrier alone: a session the route has
   // forgotten still has one, and deciding here would show a composer over it
   // again on every tab entry - the read that found it gone is not repeated,
@@ -1023,10 +1070,12 @@ function reconcilePending(state, readAt) {
 // that follows once it is processed takes the card away.
 //
 // And back again, which is the half that is easy to miss: an entry can leave
-// the queue without ever becoming a turn - an interrupt drops what was
-// waiting. "Waiting in the queue." would then stand there for good, a sentence
-// in the present tense about something that is not happening. So a card whose
-// entry is gone goes back to waiting for a turn, clock and all.
+// the queue without ever becoming a turn - being taken back is exactly that,
+// and it is what the button in the queue box does. "Waiting in the queue."
+// would then stand there for good, a sentence in the present tense about
+// something that is not happening. So a card whose entry is gone goes back to
+// waiting for a turn, clock and all - unless it is gone because it was
+// withdrawn from here, which has its own sentence below.
 //
 // Only ever called where the queue is actually known (a tail read); a null
 // queue means unread, not empty, and must not un-queue anything.
@@ -1038,9 +1087,14 @@ function markQueued(state) {
     const queued = waiting.some((item) => queueMatches(entry, item?.content));
     if (queued === marked) continue;
     clearTimeout(entry.timer);
-    entry.node.dataset.pending = queued ? 'queued' : 'true';
-    entry.hint.textContent = queued ? 'Waiting in the queue.' : '';
-    if (!queued) entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
+    // An entry that left the queue because it was taken back from here is
+    // accounted for, and the clock must not start again over it: "nothing in
+    // the transcript for it" is exactly what was asked for.
+    const taken = !queued && withdrawn(state, entry);
+    entry.node.dataset.pending = queued ? 'queued' : (taken ? 'taken' : 'true');
+    if (queued) entry.hint.textContent = 'Waiting in the queue.';
+    else entry.hint.textContent = taken ? 'Taken back out of the queue.' : '';
+    if (!queued && !taken) entry.timer = setTimeout(entry.expire, PENDING_TIMEOUT_MS);
   }
 }
 
@@ -1063,17 +1117,17 @@ function pendingCard(text) {
 // field and does something other than intended. So the pane is asked again,
 // right before the keystrokes go out.
 //
-// What that answer can say today is whether the session is still there at
-// all, which the route checks against tmux itself. `dialog` joins the same
-// answer in the next step (readDialog on the server); an absent key reads as
-// "no box open", which is the only way round a guard like this may fail.
+// The answer carries `dialog` from readDialog on the server, and an absent
+// key reads as "no box open" - the only way round a guard like this may fail,
+// so an older server or a failed read lets the send through rather than
+// blocking it.
 async function refuseSend(carrier) {
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/pane`);
     if (res.status === 404) return 'This session is gone - pick another one in the list.';
     if (!res.ok) return null;
     const pane = await res.json();
-    if (pane.dialog?.open) return 'The session is asking something - answer that card first.';
+    if (pane.dialog?.open) return 'The session is asking something - answer it in the terminal tab.';
     return null;
   } catch {
     // A check that cannot be made must not stop the send: the two booleans
@@ -1275,4 +1329,344 @@ conversationAttachEl.addEventListener('click', () => {
     if (file) attachImage(file);
   });
   picker.click();
+});
+
+// ---------- the three controls beside the composer ----------
+
+// Stop, the queue box and the mode badge all say something about the SESSION
+// rather than about the window that is loaded, so they are refreshed on the
+// poll's tick rather than on a read: the status Stop reads arrives on the
+// event stream, and a read can be several seconds away or not come at all.
+
+// How long a take-back waits before the box says the keystrokes went nowhere.
+// It has to outlast the two tail reads the press triggers - the queue travels
+// on nothing else - and the second of those is deliberately late enough for
+// Claude Code to have written its line.
+const TAKEBACK_GRACE_MS = 6000;
+// The two things a take-back can be waiting for. `checked` is set by the tail
+// read that lands after it, so everything below turns on evidence rather than
+// on a clock: while it is unset, no read has looked yet.
+const takeBackPending = (state) => Boolean(state?.takeBack) && !state.takeBack.checked;
+// Ignoring a second Stop for this long. Escape twice in a row is a control of
+// its own in Claude Code - it opens the history picker - and the button stays
+// on screen for a moment after a successful interrupt, because the status it
+// hides on arrives from the event stream a beat later.
+const STOP_LOCKOUT_MS = 2500;
+
+let takingBack = false;
+let stopSentAt = 0;
+// How the box was last drawn, so a scroll redraws it only when leaving or
+// reaching the end actually changed that - `scroll` fires per frame.
+let queueActionable = null;
+
+function waitingOf(state) {
+  // A null queue is "not read yet", not "empty" - only a tail read carries
+  // one, and nothing may be shown or acted on from the absence.
+  return state?.queue?.waiting ?? [];
+}
+
+// Gone from the queue is the only thing that says the take-back went through:
+// an entry leaves it either as a turn or without one, and this view cannot
+// see which from the queue alone. An entry whose enqueue line carried no
+// content cannot be told apart from another one, so for those the count is
+// all there is to compare.
+function takeBackDone(state) {
+  const waiting = waitingOf(state);
+  const { content, length } = state.takeBack;
+  if (waiting.length < length) return true;
+  return content !== null && !waiting.some((item) => item?.content === content);
+}
+
+// Whether this card's message is the one a take-back was aimed at. Same rule
+// the queue uses to claim a card in the first place (see queueMatches), so a
+// card can never be marked withdrawn by a queue entry that was never its own.
+function withdrawn(state, entry) {
+  return Boolean(state.takeBack) && queueMatches(entry, state.takeBack.content);
+}
+
+// A tail read has landed, which is the evidence a take-back waits for. Gone
+// from the queue means it went through and there is nothing left to say; still
+// there means the button comes back so it can be tried again, and the hint
+// takes over once the grace has passed on top of that.
+//
+// But only a read that STARTED after the keys went out may answer for it - the
+// same rule a pending card carries (see reconcilePending), and for the same
+// reason: a read already in flight holds a picture of the queue from before
+// them, however late it lands. Releasing the lock on one of those puts the
+// button back inside the very window the pane needs to redraw, which is the
+// window the lock exists for.
+//
+// A read that came too late to count zeroes the tail budget instead, so the
+// next tick fetches one that can answer - otherwise the answer this one just
+// stamped would hold the lock for a whole budget.
+//
+// Only ever called where the queue is known, right after markQueued has had
+// its look at the same answer.
+function settleTakeBack(state, readAt) {
+  if (!state.takeBack) return;
+  if (readAt <= state.takeBack.readAt) {
+    state.tailAt = 0;
+    return;
+  }
+  if (takeBackDone(state)) state.takeBack = null;
+  else state.takeBack.checked = true;
+}
+
+function queueEntryNode(entry) {
+  const node = document.createElement('div');
+  node.className = 'conversation-event conversation-waiting';
+  // An enqueue line need not carry a `content` KEY at all, and never carries
+  // an empty one, so `??` is the operator that fires here. Saying that
+  // something waits beats inventing its text.
+  node.textContent = entry?.content ?? 'One waiting message';
+  return node;
+}
+
+function takeBackButton() {
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'btn-surface btn-lift conversation-takeback';
+  back.textContent = 'Take the last one back';
+  back.addEventListener('click', takeBack);
+  return back;
+}
+
+function queueHintNode(text) {
+  const hint = document.createElement('div');
+  hint.className = 'conversation-hint';
+  hint.textContent = text;
+  return hint;
+}
+
+// Whether the queue can be worked from where the view currently stands.
+//
+// Away from the end of the conversation it cannot: the queue travels on a tail
+// read alone, and a tail read only runs while the view sits at the end - so up
+// there the box is a picture of an older moment, and taking "the last one"
+// back would aim at whatever has since taken its place.
+//
+// Nor while a take-back is still unanswered. That is the lock, and it is the
+// pane's own delay that makes it necessary: a second press would read the pane
+// before the first press's keystrokes had redrawn it, pass the gate on that
+// stale picture, and send Arrow-Up into a line the first press had just filled.
+// Tied to the read rather than to a duration, because the read is what makes
+// the box true again - and it is immediate, since a take-back zeroes the tail
+// budget.
+function queueIsActionable(state) {
+  return stickToBottom && !state?.gone && !takeBackPending(state);
+}
+
+// What waits, and whether it can be worked. The box is rebuilt only when its
+// content changes: it carries a button, and replacing that under a thumb on
+// the poll's tick would swallow the tap.
+function renderQueue(state) {
+  const waiting = waitingOf(state);
+  const actionable = queueIsActionable(state);
+  // Only once a read has actually looked and still found the entry, and only
+  // where the box is current. On the clock alone this fired after a take-back
+  // that worked, because away from the end no tail read runs to settle it -
+  // the absence of a read reported as the failure of the keystrokes. And even
+  // with a read behind it the sentence has no place up there, directly above a
+  // line saying the box is a picture of an older moment: two statements that
+  // disagree are worse than either alone.
+  const late = actionable && Boolean(state?.takeBack) && state.takeBack.checked
+    && Date.now() - state.takeBack.at > TAKEBACK_GRACE_MS;
+  const mark = JSON.stringify([
+    carrierOf(session), waiting.map((item) => item?.content ?? null),
+    actionable, late, takeBackPending(state),
+  ]);
+  conversationQueueEl.hidden = waiting.length === 0;
+  queueActionable = waiting.length === 0 ? null : actionable;
+  if (!waiting.length || conversationQueueEl.dataset.mark === mark) return;
+  conversationQueueEl.dataset.mark = mark;
+  conversationQueueEl.dataset.stale = actionable ? 'false' : 'true';
+  // The entries scroll, the button does not: a ceiling over the whole box cuts
+  // the button off and leaves the one control this box has reachable only by
+  // scrolling inside the box.
+  const list = document.createElement('div');
+  list.className = 'conversation-queue-list';
+  list.append(...waiting.map(queueEntryNode));
+  const nodes = [list];
+  if (late) nodes.push(queueHintNode('Sent, and it is still waiting - the terminal took those keys somewhere else.'));
+  // A locked-out button is replaced by the reason, never left there to be
+  // tapped into nothing: what the box says is what it is doing.
+  if (actionable) nodes.push(takeBackButton());
+  else if (takeBackPending(state)) nodes.push(queueHintNode('Taken back - waiting for the transcript to confirm it.'));
+  else nodes.push(queueHintNode('Scroll to the end to work the queue - up here it is a picture of an older moment.'));
+  conversationQueueEl.replaceChildren(...nodes);
+}
+
+// Interrupting is worth offering only while something is running: `busy` is
+// the one of the four states that means the session is producing. The label
+// says what Escape does with a queue, because it reaches further than the word
+// "stop" suggests.
+function renderStop(state) {
+  const waiting = waitingOf(state);
+  conversationStopEl.hidden = !state || state.gone || !isBusy();
+  conversationStopEl.textContent = waiting.length ? 'Stop · sends the queue' : 'Stop';
+  conversationStopEl.dataset.queued = waiting.length ? 'true' : 'false';
+}
+
+// The mode the transcript names, which is the mode the LAST submitted prompt
+// ran under - a switch writes no line of its own. So after the button has
+// been pressed the badge shows a value that may already be wrong, and it says
+// so by being dimmed until a different one arrives. The terminal's own status
+// line has the current one immediately.
+function renderMode(state) {
+  const mode = state?.permissionMode ?? null;
+  conversationModeEl.hidden = !mode || Boolean(state?.gone);
+  if (!mode) return;
+  const stale = state.modeAsked === mode;
+  conversationModeEl.textContent = mode;
+  conversationModeEl.dataset.stale = stale ? 'true' : 'false';
+  // "at the last message" in both branches: the keybar's own Shift+Tab can
+  // switch the mode without this view hearing anything, so even unasked the
+  // value is only as current as the last prompt. The attribute carries the one
+  // thing more that is known - that a switch was asked for since.
+  conversationModeEl.title = stale
+    ? `Permission mode at the last message: ${mode}, and a switch has been asked for since. Tap to switch one further.`
+    : `Permission mode at the last message: ${mode}. Tap to switch one further.`;
+  conversationModeEl.setAttribute('aria-label', conversationModeEl.title);
+  if (!stale) state.modeAsked = null;
+}
+
+function renderControls(state) {
+  renderStop(state);
+  renderMode(state);
+  renderQueue(state);
+}
+
+// The pane, read for one question: is the terminal's input line empty. Its
+// own reader rather than refuseSend's, because the two want the opposite
+// thing from a check they could not make - a send that goes out unchecked is
+// at worst a message into an open box, while the keys below edit whatever
+// happens to be on that line.
+async function promptIsClear(carrier) {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/pane`);
+    if (res.status === 404) return 'gone';
+    if (!res.ok) return 'unknown';
+    const pane = await res.json();
+    // An open box has no input line at all, so promptEmpty is false for it
+    // too - one refusal covers both, and the sentence names the reason the
+    // pane can show.
+    if (pane.dialog?.open) return 'dialog';
+    return pane.promptEmpty ? 'empty' : 'busy';
+  } catch {
+    return 'unknown';
+  }
+}
+
+// The one destructive thing this view can do, so it is the one place where a
+// check that cannot be made refuses rather than waves through.
+//
+// Arrow-Up reaches the queue only from an empty first row: with anything on
+// that line it walks history or moves the cursor instead, and the Ctrl+U
+// after it would then clear a stranger's text to the line start. Claude Code
+// also writes prompt SUGGESTIONS onto that line, which look exactly like
+// something typed - so the gate cannot tell them apart and errs towards
+// refusing.
+//
+// Both keys, not just the Arrow-Up that empties the queue: the Arrow-Up
+// leaves the withdrawn message sitting on the input line, and the next send
+// from here pastes into that same line - the two would go out as one message.
+async function takeBack() {
+  const carrier = carrierOf(session);
+  // Read, never created, the same rule the Stop handler beside it follows: a
+  // click on a control the view never showed must not put an entry in the map.
+  const state = stateBySession.get(carrier);
+  if (!carrier || !state || takingBack) return;
+  const waiting = waitingOf(state);
+  const target = waiting.at(-1);
+  if (!target) return;
+  takingBack = true;
+  try {
+    const gate = await promptIsClear(carrier);
+    // The session can have been swapped while that was in flight, and the
+    // iframe with it - the keys would land in another session's terminal.
+    if (!sameView(carrier, state)) return;
+    if (gate === 'gone') {
+      showError('This session is gone - pick another one in the list.');
+      return;
+    }
+    if (gate === 'dialog') {
+      showError('The session is asking something - answer it in the terminal tab.');
+      return;
+    }
+    if (gate === 'busy') {
+      showError('The terminal input line is not empty - open the terminal tab, clear that line, then try again.');
+      return;
+    }
+    if (gate === 'unknown') {
+      showError('The terminal could not be read just now - nothing was sent. Try again in a moment.');
+      return;
+    }
+    if (!sendKey('ArrowUp')) {
+      showError('The terminal is not ready yet - open the terminal tab once, then try again.');
+      return;
+    }
+    // Its own sentence: the Arrow-Up has already put the withdrawn message on
+    // the input line, and without the Ctrl+U it stays there - where the next
+    // send from here would paste into it.
+    if (!sendKey('u', true)) {
+      showError('Only half of it went out - the message is on the terminal input line now. Clear it there.');
+      return;
+    }
+    state.takeBack = {
+      content: target.content ?? null,
+      length: waiting.length,
+      at: Date.now(),
+      // The last read handed out before the keys left, so a read already in
+      // flight cannot answer for this one (see settleTakeBack).
+      readAt: readNo,
+      checked: false,
+    };
+    // Straight away, so the button is gone before a second tap can reach it -
+    // the queue itself only changes with the tail read below.
+    renderQueue(state);
+    // The queue travels on a tail read and on nothing else, so the box would
+    // otherwise keep the withdrawn entry until the budget came round.
+    refreshConversation();
+    setTimeout(() => {
+      if (carrierOf(session) === carrier) refreshConversation();
+    }, QUEUE_LOOK_MS);
+  } finally {
+    takingBack = false;
+  }
+}
+
+conversationStopEl.addEventListener('click', () => {
+  // Read, never created: this runs from a click, and a click on a control the
+  // view never showed must not put an entry in the map.
+  const waiting = waitingOf(stateBySession.get(carrierOf(session))).length;
+  // Escape twice in a row opens Claude Code's history picker, and this button
+  // outlives its own effect by the moment the status takes to arrive.
+  if (Date.now() - stopSentAt < STOP_LOCKOUT_MS) {
+    showToast('Escape already sent - a second one opens the history picker.');
+    return;
+  }
+  // Escape does not leave the queue alone - what waits is due to go next, not
+  // to be cancelled, which is the opposite of what the word "Stop" suggests.
+  // So with a queue it is asked about rather than taken at face value.
+  if (waiting > 0 && !window.confirm(
+    `Escape interrupts the running turn. The ${waiting} waiting message(s) are not cancelled by it - they are due to be sent next. Continue?`,
+  )) return;
+  if (!sendKey('Escape')) {
+    showError('The terminal is not ready yet - open the terminal tab once, then try again.');
+    return;
+  }
+  stopSentAt = Date.now();
+});
+
+// One step, never a jump to a named mode: Shift+Tab cycles, and where it
+// landed is said by the next permission-mode line rather than by counting
+// steps against a list of modes that can change.
+conversationModeEl.addEventListener('click', () => {
+  const state = stateBySession.get(carrierOf(session));
+  if (!sendKey('Tab', false, true)) {
+    showError('The terminal is not ready yet - open the terminal tab once, then try again.');
+    return;
+  }
+  if (state) state.modeAsked = state.permissionMode;
+  renderMode(state);
 });

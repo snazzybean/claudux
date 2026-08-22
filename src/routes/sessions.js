@@ -19,6 +19,7 @@ import {
   isUnwantedDeath,
 } from '../lib/tmuxManager.js';
 import { sanitizePaneText } from '../lib/paneText.js';
+import { readDialog, promptIsEmpty } from '../lib/paneDialog.js';
 import { setMeta, getMeta, tmuxSessionFor, recordClaudeSwitch, claudeSessionIdsForTmux } from '../lib/sessionMeta.js';
 import { chooseTranscript } from '../lib/contextUsage.js';
 import { subagentsDirFor, AGENT_ID_RE } from '../lib/subagentWatcher.js';
@@ -384,7 +385,14 @@ export function sessionsRouter(config) {
         return res.status(404).json({ error: 'Session not found' });
       }
       const raw = await capturePane(req.params.id);
-      res.json({ raw, clean: sanitizePaneText(raw) });
+      const clean = sanitizePaneText(raw);
+      // Both readings of the pane travel with it: what the session is
+      // asking, and whether its input line is empty. They live on the
+      // server because either can silently be wrong (see paneDialog.js) and
+      // src/ is the half that has tests - the browser must not interpret
+      // terminal text itself. Same request as the text view, so a client
+      // that needs one of the three pays for one round trip.
+      res.json({ raw, clean, dialog: readDialog(clean), promptEmpty: promptIsEmpty(clean) });
     } catch (err) {
       next(err);
     }
