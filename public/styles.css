@@ -4003,6 +4003,17 @@ button { cursor: pointer; }
   font-size: var(--fs-ui);
   overflow-wrap: anywhere;
 }
+/* One line, however long the command: all of it is in the box below. On the
+   summary itself, and its `display: list-item` stays - the disclosure marker
+   comes from that, sits INSIDE the box (`list-style-position: inside`, so the
+   overflow does not reach it) and keeps its place on the line. Measured: 30px
+   over two lines when the label carried the clamp in a block of its own, 15px
+   over one line here. */
+.conversation-tool-call > summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .conversation-pre {
   margin: 4px 0 0;
   white-space: pre-wrap;
@@ -4379,6 +4390,34 @@ button { cursor: pointer; }
   color: var(--text);
   font: inherit;
   font-size: var(--fs-body);
+}
+/* A dot rather than a glyph, for the reason icons.js exists: a character
+   picked for this would be an empty box on whichever device lacks it. */
+.conversation-working {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-ui);
+}
+.conversation-working[hidden] { display: none; }
+.conversation-working::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  animation: conversation-working-pulse 1.4s ease-in-out infinite;
+}
+@keyframes conversation-working-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+/* Whoever asked for less motion gets the dot, not the pulse - it still says
+   the same thing by being there at all. */
+@media (prefers-reduced-motion: reduce) {
+  .conversation-working::before { animation: none; opacity: 1; }
 }
 .conversation-input::placeholder { color: var(--text-muted); }
 /* Calmer than the global focus ring, for the same reason .search-input

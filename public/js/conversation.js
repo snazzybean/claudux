@@ -185,7 +185,18 @@ function noteNode(text) {
   return note;
 }
 
+// A run of tool calls is most of what a long turn puts on screen, and a
+// command wrapped over three lines makes the run unreadable on a phone. Its
+// own class rather than the shared summary rule: a tool's title is the one
+// foldout label that is a command line - thinking, a result and a diff all
+// carry a short label a clamp could only ever cut wrongly.
 function toolNode(event) {
+  const node = toolFoldout(event);
+  node.classList.add('conversation-tool-call');
+  return node;
+}
+
+function toolFoldout(event) {
   const title = `${event.name}${event.detail ? ` · ${event.detail}` : ''}`;
   // No result means the call has not come back yet - it is running. It
   // cannot mean "not loaded": a result always follows its call in the file,
