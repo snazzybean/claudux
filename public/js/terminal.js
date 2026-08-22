@@ -452,7 +452,10 @@ export function keyCodeFor(key) {
 // pressed again - but the composer in the conversation view says so.
 export function sendKey(key, ctrl, shift) {
   const doc = terminalFrameEl.contentDocument;
-  if (!doc) return false; // iframe not loaded (same-origin) yet
+  // The terminal and not just the document: an iframe on about:blank has one -
+  // after "release the terminal", and for a moment after every load - and
+  // nothing in it listens, so a document alone would report a key as sent.
+  if (!doc || !terminalFrameEl.contentWindow?.term) return false;
   const target =
     doc.activeElement && doc.activeElement !== doc.body
       ? doc.activeElement

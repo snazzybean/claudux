@@ -73,6 +73,15 @@ function stateFor(carrier) {
       // A Shift+Tab leaves no line in the transcript, so this is the only
       // way the badge can say that what it shows may be out of date.
       modeAsked: null,
+      // The two halves of the card that answers an open box: what the pane
+      // says is on screen (readDialog's reading, so the KEYS), and what the
+      // hook reported about it (the CONTENT). Both `null` for "not read
+      // yet" - an unread pane must not hide the composer, and an unread
+      // hook must not take a title away. `answered` is the lock while a
+      // keystroke is on its way (see answer).
+      dialog: null,
+      held: null,
+      answered: null,
       // Whether the route still knows this session. It belongs here and not
       // on the composer's `hidden`, because three places set that flag and
       // only one of them can find this out: entering the tab decides from
@@ -497,8 +506,15 @@ function sameView(carrier, state) {
 // Hidden rather than disabled, the reasoning Task 7 settled: a disabled Send
 // still claims there is a way to answer from here and it is merely
 // unavailable.
+//
+// And gone while a box is open, which is the third of those states: free text
+// into an open dialog lands in its selection field and does something other
+// than intended. Here the sentence Task 7 settled is stronger still - there IS
+// a way to answer from this tab, and it is the card standing where the
+// composer was. That swap is also what pays for the card: the column is fully
+// subscribed, and these two are never on screen at the same time.
 function showComposer(state) {
-  conversationComposerEl.hidden = !state || state.gone;
+  conversationComposerEl.hidden = !state || state.gone || dialogIsOpen(state);
 }
 
 // Any answer at all is proof the session is still there to be answered. Both
@@ -610,12 +626,23 @@ function tailIsDue(state) {
 // window cut at the event cap says nothing about that message, a transcript
 // that has been replaced says it was processed (see poll).
 async function restart(carrier, { keepPending = false } = {}) {
-  const held = stateBySession.get(carrier)?.pending ?? [];
+  const previous = stateBySession.get(carrier);
+  const held = previous?.pending ?? [];
   // Dropped cards have their clocks stopped here - a timer left running would
   // put a receipt on a node that belongs to no view any more.
   if (!keepPending) for (const entry of held) clearTimeout(entry.timer);
   stateBySession.delete(carrier);
-  if (keepPending) stateFor(carrier).pending.push(...held);
+  const state = stateFor(carrier);
+  if (keepPending) state.pending.push(...held);
+  // The box in the terminal is not part of the transcript and survives all
+  // three reasons to start over. Dropped with the rest it would take the card
+  // off the screen for a tick, drop the receipt for a keystroke on its way,
+  // and leave the buttons drawn from the old box comparing against nothing.
+  if (previous) {
+    state.dialog = previous.dialog;
+    state.held = previous.held;
+    state.answered = previous.answered;
+  }
   stickToBottom = true;
   hideJump();
   await loadTail();
@@ -744,6 +771,9 @@ function pollNow() {
   // for an answer, and poll() has several paths that return without one.
   const carrier = carrierOf(session);
   if (carrier) renderControls(stateFor(carrier));
+  // Beside renderControls and for the same reason: what the card says comes
+  // off the pane and the hook, neither of which the transcript read touches.
+  refreshDialog().catch(() => {});
   poll().catch(() => {}).finally(schedule);
 }
 
@@ -821,7 +851,6 @@ conversationJumpEl.addEventListener('click', () => {
 export function showConversation(nextSession) {
   session = nextSession;
   conversationPanelEl.hidden = false;
-  conversationDialogEl.hidden = true;
   // Entering the tab means following again: the view opens at the end, so
   // there is nothing left to jump to.
   stickToBottom = true;
@@ -837,6 +866,11 @@ export function showConversation(nextSession) {
   // state and hide themselves when there is none. One writer, like the
   // composer beside them.
   renderControls(state);
+  // The card the same way, and from the state rather than hidden outright: a
+  // session re-entered with a box still standing would otherwise get a frame
+  // with neither a composer nor anything in its place. The fresh reading is a
+  // request away (below); this is what was true when the tab was left.
+  renderDialog(state);
   // From the state, never from the carrier alone: a session the route has
   // forgotten still has one, and deciding here would show a composer over it
   // again on every tab entry - the read that found it gone is not repeated,
@@ -855,6 +889,9 @@ export function showConversation(nextSession) {
   if (state.events.length || state.pending.length) render(state, { scroll: 'end' });
   else showNotice('Loading the conversation…');
   if (entryNeedsTail(state)) loadTail().catch((err) => showError(err.message));
+  // Straight away rather than on the first tick: that is up to five seconds
+  // out, and a box already standing is the reason someone opened this tab.
+  refreshDialog().catch(() => {});
   schedule();
 }
 
@@ -1431,7 +1468,7 @@ function takeBackButton() {
   return back;
 }
 
-function queueHintNode(text) {
+function hintNode(text) {
   const hint = document.createElement('div');
   hint.className = 'conversation-hint';
   hint.textContent = text;
@@ -1487,12 +1524,12 @@ function renderQueue(state) {
   list.className = 'conversation-queue-list';
   list.append(...waiting.map(queueEntryNode));
   const nodes = [list];
-  if (late) nodes.push(queueHintNode('Sent, and it is still waiting - the terminal took those keys somewhere else.'));
+  if (late) nodes.push(hintNode('Sent, and it is still waiting - the terminal took those keys somewhere else.'));
   // A locked-out button is replaced by the reason, never left there to be
   // tapped into nothing: what the box says is what it is doing.
   if (actionable) nodes.push(takeBackButton());
-  else if (takeBackPending(state)) nodes.push(queueHintNode('Taken back - waiting for the transcript to confirm it.'));
-  else nodes.push(queueHintNode('Scroll to the end to work the queue - up here it is a picture of an older moment.'));
+  else if (takeBackPending(state)) nodes.push(hintNode('Taken back - waiting for the transcript to confirm it.'));
+  else nodes.push(hintNode('Scroll to the end to work the queue - up here it is a picture of an older moment.'));
   conversationQueueEl.replaceChildren(...nodes);
 }
 
@@ -1670,3 +1707,457 @@ conversationModeEl.addEventListener('click', () => {
   if (state) state.modeAsked = state.permissionMode;
   renderMode(state);
 });
+
+// ---------- the card that answers an open box ----------
+
+// Two sources, one card, and neither can do the other's job. The hook says
+// WHAT is being asked - the question with its options, the whole plan, the
+// tool and its arguments - and it fires for all three kinds of box. The pane
+// says which KEY picks which option, which the payload cannot: the box carries
+// options the model never offered ("Type something.", "allow reading from …
+// during this session").
+//
+// Three layers and none of them needs the one above it. Without the hook the
+// mirrored box still stands and its keys still work; without a recognised
+// numbering the raw keys still go out; and either way the terminal keeps its
+// own box, because the hook answers `escalate`.
+//
+// `permission_suggestions` is deliberately nowhere on the card. It is ABSENT
+// rather than empty for a question and for a plan confirmation - the concept
+// does not apply there - so anything showing it would have to say something
+// about a field it must not read as "none were offered"; and where it does
+// exist, the box already carries it as an option, verbatim and next to the key
+// that picks it.
+
+// How long an answer waits for the box to change before the card says the keys
+// went nowhere. The pane redraws seconds late, so a shorter clock would call a
+// keystroke that did arrive a failure.
+const DIALOG_GRACE_MS = 6000;
+// And the earliest second look worth taking after one, for the same reason: a
+// capture straight after a keypress still shows the state from before it.
+const DIALOG_LOOK_MS = 1500;
+// What of a tool's arguments fits on one line of a title. A Bash command runs
+// to whatever was written; all of it is in the mirror below.
+const MAX_TITLE_DETAIL = 160;
+// What is offered when the pane's numbering came back empty - an open box this
+// module recognised nothing in. Bare keys and no labels, because a label here
+// would be an invention: a box numbers its options from 1, and one it has no
+// option for is one it ignores.
+const RAW_KEYS = ['1', '2', '3'];
+
+let refreshingDialog = false;
+let answering = false;
+// The same idea as readNo above, for this view's other read: only a look that
+// STARTED after the keys went out may report on them (see settleAnswer).
+let dialogReadNo = 0;
+
+function dialogIsOpen(state) {
+  return Boolean(state?.dialog?.open) && !state.gone;
+}
+
+// The box's identity, and deliberately not its text: `mirrored` is the whole
+// pane and changes with every spinner frame, so it can say nothing about
+// whether this is still the same box. What can: whether one is open at all,
+// what it offers, and when the hook last reported one. The last of those is
+// what tells two identical boxes apart - a denied Read the model retries
+// produces the same options twice, and without it an answer to the first would
+// hold the card locked over the second.
+//
+// A label is folded out of the pane at whatever width the pane had, so the same
+// box at two widths marks differently. That is the identity being right about
+// what it can see, not too strict: the answer is to keep the card young, which
+// is what the look on a resize below is for.
+function dialogMark(state) {
+  return JSON.stringify([
+    Boolean(state?.dialog?.open),
+    (state?.dialog?.options ?? []).map((option) => [option.key, option.label]),
+    state?.held?.at ?? null,
+  ]);
+}
+
+// A keystroke is on its way until the box changes - or until the grace has
+// passed with a look behind it, which is the evidence and not the clock: while
+// no read has landed, nothing has been checked. Same shape as the take-back
+// lock above, and necessary for the same reason: the pane's delay would let a
+// second tap pass the gate on the picture from before the first one.
+const answerLate = (state) => Boolean(state?.answered?.checked)
+  && Date.now() - state.answered.at > DIALOG_GRACE_MS;
+const answerPending = (state) => Boolean(state?.answered) && !answerLate(state);
+
+function settleAnswer(state, readAt) {
+  const lock = state.answered;
+  if (!lock) return;
+  // A different box, or none at all: the keys did what they were sent for and
+  // there is nothing left to say.
+  if (dialogMark(state) !== lock.mark) {
+    state.answered = null;
+    return;
+  }
+  if (readAt > lock.readAt) lock.checked = true;
+}
+
+// Read, Write and Edit are the permissions that come up most, and their tool
+// name on its own says nothing about what is being asked - so the one argument
+// that identifies the call travels with it.
+//
+// Cut from opposite ends, because the informative end differs: a command says
+// what it is in its first word, a path in its last. Cutting a path from the
+// back would leave the directory and drop the file name - the one thing the
+// title exists to say.
+function toolDetail(input) {
+  const command = typeof input?.command === 'string' && input.command ? input.command : null;
+  const filePath = typeof input?.file_path === 'string' && input.file_path ? input.file_path : null;
+  const detail = command ?? filePath;
+  if (!detail || detail.length <= MAX_TITLE_DETAIL) return detail;
+  return command
+    ? `${detail.slice(0, MAX_TITLE_DETAIL)}…`
+    : `…${detail.slice(-MAX_TITLE_DETAIL)}`;
+}
+
+// From the hook and never from the pane: no rule for where the question sits
+// holds across the box shapes, which is why readDialog returns no question at
+// all. With no hook payload the sentence says only what the pane itself proves
+// - that something is being asked - and the mirror below says what.
+function dialogTitle(held) {
+  if (!held) return 'The session is asking for confirmation';
+  if (held.toolName === 'AskUserQuestion') {
+    // The first question and no attempt at the rest: whether the tool ever
+    // sends several, and whether the box then shows them one after another or
+    // together, is unmeasured - and a title assembled for a shape nobody has
+    // seen would be a guess where the mirror below is the fact.
+    return held.toolInput?.questions?.[0]?.question ?? 'A question';
+  }
+  if (held.toolName === 'ExitPlanMode') return 'Ready to execute this plan';
+  const detail = toolDetail(held.toolInput);
+  return detail ? `${held.toolName} · ${detail}` : held.toolName;
+}
+
+// The plan as it was written, not as it is rendered: this is markdown from the
+// payload and there is no server render for it here, and inventing one in the
+// browser would put an unsanitized document on the page.
+function planOf(held) {
+  if (held?.toolName !== 'ExitPlanMode') return null;
+  return typeof held.toolInput?.plan === 'string' ? held.toolInput.plan : null;
+}
+
+// The key and the box it was read off travel together: a card can stand for
+// five seconds after its box has been answered elsewhere, and the next box
+// numbers its own options - so a button says which box it is the answer to,
+// and answer() refuses if that is no longer the one standing.
+function dialogButton(key, label, className, mark) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener('click', () => { answer(key, mark).catch(() => {}); });
+  return button;
+}
+
+// One writer for the card, like renderQueue beside it, and it rebuilds only
+// when what it says changes: the card carries the buttons that answer the box,
+// and replacing those under a thumb on the poll's tick would swallow the tap.
+function renderDialog(state) {
+  const open = dialogIsOpen(state);
+  conversationDialogEl.hidden = !open;
+  if (!open) {
+    delete conversationDialogEl.dataset.mark;
+    conversationDialogEl.replaceChildren();
+    return;
+  }
+  const locked = answerPending(state);
+  const late = answerLate(state);
+  const title = dialogTitle(state.held);
+  const plan = planOf(state.held);
+  // What waits behind the box, because nothing else on screen says it any
+  // more: the queue box is hidden for as long as this card stands, and Stop -
+  // which task 10 relied on to carry the same signal - is hidden too, since a
+  // session holding a box open is `waiting` rather than `busy`. So the count
+  // moves onto the card that displaced them.
+  const waiting = waitingOf(state).length;
+  const boxMark = dialogMark(state);
+  const mark = JSON.stringify([carrierOf(session), boxMark, title, plan, locked, late, waiting]);
+  if (conversationDialogEl.dataset.mark === mark) return;
+  conversationDialogEl.dataset.mark = mark;
+  // Set here rather than in the markup: the element is shared with nothing
+  // else, but it is empty and nameless whenever no box is open.
+  conversationDialogEl.setAttribute('role', 'group');
+  conversationDialogEl.setAttribute('aria-label', 'What the session is asking');
+
+  const heading = document.createElement('div');
+  heading.className = 'conversation-dialog-title';
+  heading.textContent = title;
+
+  const options = state.dialog.options;
+  // The card's height depends on nothing but the ceiling on this box: neither
+  // a foldout opened inside it nor a title four lines long moves the rows
+  // below, which is why the title sits in here rather than pinned above.
+  const body = document.createElement('div');
+  body.className = 'conversation-dialog-body';
+  // What is being asked scrolls separately from what answers it, and the two
+  // shares add up to that ceiling. Sharing one scroller, the answers are what
+  // leaves the screen: the explanation is the part whose length varies, and a
+  // plan or a long path is enough to push every button past the bottom edge.
+  // So the fixed share is the explanation's and the rest is theirs.
+  const explain = document.createElement('div');
+  explain.className = 'conversation-dialog-explain';
+  explain.append(heading);
+  if (plan) {
+    const planNode = document.createElement('pre');
+    planNode.className = 'conversation-dialog-plan';
+    planNode.textContent = plan;
+    explain.append(planNode);
+  }
+  // Always mirrored, never only interpreted - but folded away once the keys
+  // are known, because then it is the safety net rather than the content, and
+  // this column has no height for both. A box nothing was recognised in has
+  // nothing else to show, so there it stands open.
+  const mirror = document.createElement('pre');
+  mirror.className = 'conversation-dialog-mirror';
+  mirror.textContent = state.dialog.mirrored;
+  if (options.length) {
+    const details = foldout('Show the box as it stands in the terminal', mirror);
+    // The box is at the BOTTOM of the pane, under whatever else is on screen.
+    // On the toggle rather than at build time: a closed <details> has no laid
+    // out height to scroll to, so the card would open at the start banner.
+    details.addEventListener('toggle', () => { explain.scrollTop = explain.scrollHeight; });
+    explain.append(details);
+  } else {
+    explain.append(mirror);
+  }
+  body.append(explain);
+
+  // Enter and Esc last and outside the scroller: whatever the box turns out to
+  // be, confirming the selection and backing out of it are the two things it
+  // answers to - a plan confirmation advertises neither and does both.
+  const escapes = document.createElement('div');
+  escapes.className = 'conversation-dialog-keys';
+  // Marked like the numbered buttons, and for the same reason: Enter confirms
+  // whatever box is standing, so out of a card that has gone stale it is the
+  // one key with no label to give the mistake away.
+  escapes.append(
+    dialogButton('Enter', 'Enter', 'btn-quiet conversation-dialog-key', boxMark),
+    dialogButton('Escape', 'Esc', 'btn-quiet conversation-dialog-key', boxMark),
+  );
+
+  // A locked-out button is replaced by the reason, never left there to be
+  // tapped into nothing - the rule the queue box follows too. Which is why the
+  // numbered buttons are built here and not with the explanation above: built
+  // there they would ride out the lock unreachable by that rule but perfectly
+  // tappable.
+  const nodes = [body];
+  // Before the rows that are tapped, so those stay at the bottom edge where a
+  // thumb reaches them.
+  if (waiting) nodes.push(hintNode(`${waiting} message(s) waiting behind this box.`));
+  if (locked) {
+    nodes.push(hintNode('Answered - waiting for the terminal to confirm it.'));
+  } else {
+    const list = document.createElement('div');
+    list.className = 'conversation-dialog-options';
+    const keys = options.length ? options : RAW_KEYS.map((key) => ({ key, label: null }));
+    for (const { key, label } of keys) {
+      list.append(dialogButton(
+        key,
+        label === null ? key : `${key} · ${label}`,
+        'btn-surface btn-lift conversation-dialog-option',
+        boxMark,
+      ));
+    }
+    body.append(list);
+    nodes.push(escapes);
+  }
+  if (late) nodes.push(hintNode('Sent, and the box is still standing - the terminal took those keys somewhere else.'));
+  conversationDialogEl.replaceChildren(...nodes);
+  // A box nothing was recognised in has its whole text on screen and the keys
+  // under it; the interesting end of a pane is the bottom one.
+  if (!options.length) explain.scrollTop = explain.scrollHeight;
+}
+
+// The pane, read for the card. Its own reader beside refuseSend's and
+// promptIsClear's, because it is the only one of the three that wants the
+// reading itself rather than a verdict - and because the card and the buttons
+// on it have to be looking at the same answer.
+async function readPaneDialog(carrier) {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(carrier)}/pane`);
+    if (res.status === 404) return { gone: true };
+    if (!res.ok) return {};
+    const pane = await res.json();
+    // An absent key reads as "no box open", the same way refuseSend takes it:
+    // an older server without the field must not put a card on the screen.
+    return { dialog: pane.dialog ?? { open: false, options: [], mirrored: '' } };
+  } catch {
+    return {};
+  }
+}
+
+// What the hook reported, if it fired. A read that fails leaves the last
+// payload standing rather than clearing it: no answer means unknown, not "no
+// content for this box", and the card would otherwise lose its title to one
+// missed request.
+async function readHeldDialog(carrier) {
+  try {
+    const res = await fetch(`/api/permission/${encodeURIComponent(carrier)}`);
+    if (!res.ok) return {};
+    return { held: (await res.json()).dialog ?? null };
+  } catch {
+    return {};
+  }
+}
+
+// Both sources on every tick, with no session status in front of them. The box
+// is exactly what the registry calls `waiting`, so gating on that status would
+// be cheaper - but a status this view has not been told about would then leave
+// the card off the screen for the one control that cannot be worked around
+// from this tab, and nothing on screen would say so. The cost of the other way
+// round is one capture-pane per tick while this tab is open and in front.
+async function refreshDialog() {
+  const carrier = carrierOf(session);
+  if (!carrier) return;
+  const state = stateFor(carrier);
+  if (refreshingDialog) return;
+  refreshingDialog = true;
+  const readAt = dialogReadNo + 1;
+  dialogReadNo = readAt;
+  try {
+    const [pane, hook] = await Promise.all([readPaneDialog(carrier), readHeldDialog(carrier)]);
+    if (!sameView(carrier, state)) return;
+    // Silent, like the poll's own non-404 path: a banner over the conversation
+    // for one missed tick would be worse than the tick. A session that has
+    // gone away is reported by the transcript read instead, which has the more
+    // careful rule for saying so - and which runs on the same tick.
+    if (!pane.dialog) return;
+    state.dialog = pane.dialog;
+    if ('held' in hook) state.held = hook.held;
+    // The store holds at most the box that is standing. Nothing else clears
+    // it: a dialog answered in the terminal leaves the hook's payload behind,
+    // and the next box the hook fails to report would then be drawn with the
+    // previous one's title. Done here and not when a key goes out, because a
+    // key can miss and the box then stays.
+    if (!state.dialog.open && state.held) {
+      state.held = null;
+      fetch(`/api/permission/${encodeURIComponent(carrier)}`, { method: 'DELETE' }).catch(() => {});
+    }
+    settleAnswer(state, readAt);
+    renderDialog(state);
+    showComposer(state);
+  } finally {
+    refreshingDialog = false;
+  }
+}
+
+// A resize is not one more tick, it is the event that makes the card wrong: the
+// terminal resizes with the window, tmux with the terminal, and Claude Code
+// redraws the box at the new width - where readDialog folds a wrapped label at
+// a different place and the same box marks differently (see dialogMark). Left
+// to the poll, someone who turns the phone to read a long path taps a key that
+// is still exactly right and is told the card is out of date. So the redraw is
+// followed instead of waited out.
+//
+// A few of them rather than one at a chosen moment: the chain leaves the
+// browser and comes back on a capture, so any single delay is a guess at how
+// long tmux and Claude Code take - and a look that is early reads the old
+// width and settles nothing. The spread is covered instead, out to the delay a
+// keystroke waits, with the poll as the backstop behind it. Rearmed from the
+// LAST resize, because a rotation fires a whole run of them.
+//
+// Only while a card stands, so a dragged window costs a capture-pane in no
+// other state. The other way the width moves has no event here at all: a
+// second client on the same session changes it through
+// `tmux window-size latest`, and for that the poll is all there is.
+const DIALOG_RESIZE_LOOKS_MS = [250, 750, 1500];
+let resizeLooks = [];
+
+function cardStands() {
+  return dialogIsOpen(stateBySession.get(carrierOf(session)));
+}
+
+window.addEventListener('resize', () => {
+  for (const look of resizeLooks) clearTimeout(look);
+  resizeLooks = DIALOG_RESIZE_LOOKS_MS.map((ms) => setTimeout(() => {
+    if (cardStands()) refreshDialog().catch(() => {});
+  }, ms));
+});
+
+// A keypress can land nowhere, and it can land somewhere else: the box may
+// have been answered in the terminal since the card was drawn, and the next
+// one may already be standing in its place - a session with a box open is
+// `waiting` rather than busy, so the card carries the buttons it was drawn
+// with for as long as the idle tick. So the pane is read again right before
+// the keys go out, and a check that cannot be made refuses here the way the
+// take-back does - a key sent into no box lands on the input line as a
+// character, and the next send from here pastes into that same line.
+//
+// `mark` is the box the tapped button was drawn for (see dialogButton). It is
+// the half of the question that "is a box open" cannot answer: a `1` meant for
+// "Blau" grants a permission that was not on screen when the thumb came down.
+async function answer(key, mark) {
+  const carrier = carrierOf(session);
+  // Read, never created: a click on a control the view never showed must not
+  // put an entry in the map.
+  const state = stateBySession.get(carrier);
+  // The lock as well as the flag: the flag covers the read this call makes,
+  // the lock covers the redraw the terminal still owes. Checked here and not
+  // only in the renderer, because a node built before the lock went up is
+  // still a node that can be tapped.
+  if (!carrier || !state || answering || answerPending(state)) return;
+  answering = true;
+  try {
+    const read = await readPaneDialog(carrier);
+    // The session can have been swapped while that was in flight, and the
+    // iframe with it - the keys would land in another session's terminal.
+    if (!sameView(carrier, state)) return;
+    if (read.gone) {
+      showError('This session is gone - pick another one in the list.');
+      return;
+    }
+    if (!read.dialog) {
+      showError('The terminal could not be read just now - nothing was sent. Try again in a moment.');
+      return;
+    }
+    state.dialog = read.dialog;
+    if (!read.dialog.open) {
+      // Answered in the terminal meanwhile. The card goes, and the key does
+      // not: it would be typed into whatever the box left behind.
+      state.answered = null;
+      renderDialog(state);
+      showComposer(state);
+      showToast('Already answered in the terminal.');
+      return;
+    }
+    if (dialogMark(state) !== mark) {
+      // The card is not this box any more - either another one is standing,
+      // or this one was redrawn at a width that folds its labels differently.
+      // The pane cannot tell those two apart and neither can this; what it can
+      // say is that the card the thumb came down on is out of date, which is
+      // true of both. The payload goes with it - kept, it would put the old
+      // question's title over the new box's buttons - and the tick started
+      // here brings back whatever holds, the same payload included if the box
+      // never changed.
+      state.held = null;
+      renderDialog(state);
+      showToast('The card was out of date - nothing was sent. Check it and tap again.');
+      refreshDialog().catch(() => {});
+      return;
+    }
+    if (!sendKey(key)) {
+      showError('The terminal is not ready yet - open the terminal tab once, then try again.');
+      return;
+    }
+    state.answered = {
+      mark: dialogMark(state),
+      at: Date.now(),
+      // The last look handed out before the keys left, so one already in
+      // flight cannot answer for them (see settleAnswer).
+      readAt: dialogReadNo,
+      checked: false,
+    };
+    // Straight away, so the buttons are gone before a second tap can reach
+    // them - the pane says the box is answered a redraw later, if at all.
+    renderDialog(state);
+    setTimeout(() => {
+      if (carrierOf(session) === carrier) refreshDialog().catch(() => {});
+    }, DIALOG_LOOK_MS);
+  } finally {
+    answering = false;
+  }
+}

@@ -4062,6 +4062,141 @@ button { cursor: pointer; }
   font-size: var(--fs-meta);
 }
 [data-pending="stale"] .conversation-hint { color: var(--danger); }
+/* What the session is asking, answerable from here. Two sources in one card:
+   the title and the plan come from the PermissionRequest hook, the numbered
+   buttons from the terminal box itself - the payload does not say which key
+   picks which option, and the box carries options the model never offered.
+
+   `0 0 auto` like everything else in this column, and its share comes out of
+   the composer's: the composer is hidden for exactly as long as this card
+   stands (see showComposer), so the column never carries five items and the
+   card inherits the field's ceiling, the control row under it and the gap
+   between them. The floor below pays for the rest. */
+.conversation-dialog {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  /* The line that separates what is being asked from the conversation above
+     it, the same way the queue box separates what has not been said yet. */
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-xs);
+}
+/* Its own `display: flex` beats the UA's `[hidden]` rule regardless of
+   specificity - the same trap the panel, the queue and the composer carry. */
+.conversation-dialog[hidden] { display: none; }
+/* And the queue box goes with it, for as long as the card stands: with the
+   keyboard up and a full queue, the composer's share alone does not pay for a
+   card that carries answer buttons.
+
+   The queue is the right one to give way, and not only because it is the
+   smallest share here. While a box is open nothing can be sent and nothing can
+   be queued, and its one control already refuses in this exact state (the
+   take-back needs an empty input line, which an open box does not have) - so
+   what is hidden is a reading that cannot be acted on, and it is back the
+   moment the box is answered.
+
+   In `:has()` rather than in a second writer of `hidden`, so it can never
+   disagree with the card about whether a box is open; where `:has()` is
+   missing, both boxes stand and the column clips as it did before. */
+.conversation-panel:has(.conversation-dialog:not([hidden])) .conversation-queue {
+  display: none;
+}
+/* What is being asked, in as many lines as it takes: an AskUserQuestion title
+   is a sentence, not a label. */
+.conversation-dialog-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Everything that varies in length, under one ceiling, so that neither a
+   foldout opened inside it nor a four-line title moves the two rows below it.
+   Against --app-height and not vh for the reason the whole column is: with the
+   keyboard up, vh stays at the old value. 0.26 is the largest share at which
+   nothing in this column is clipped, down to the height at which it stops
+   fitting at all - the row that says what is waiting behind the box included,
+   which is there exactly when the column is fullest. */
+.conversation-dialog-body {
+  max-height: calc(var(--app-height, 100dvh) * 0.26);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+/* What is being asked scrolls separately from what answers it, and takes the
+   smaller share. In one scroller with the buttons below it, the buttons are
+   what leaves the screen - the explanation is the part whose length varies,
+   and a plan or a long path is enough to push all of them past the bottom
+   edge. This ceiling is what a long explanation cannot spend. */
+.conversation-dialog-explain {
+  /* Never gives its share to the answers, so the split is the one it looks
+     like; the answers take what is left and shrink into it. */
+  flex: 0 0 auto;
+  max-height: calc(var(--app-height, 100dvh) * 0.12);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+/* Two scrollers in the card and no third: the foldout in the stream brings a
+   ceiling of its own along, and inside here that would be one more box to
+   swipe in for the sake of the same text. */
+.conversation-dialog .conversation-foldout-body {
+  max-height: none;
+  overflow: visible;
+}
+.conversation-dialog summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--fs-ui);
+}
+/* The plan as it was written and the box as it stands: both are text someone
+   else produced, so both keep their own line breaks and neither gets a font
+   of this interface's choosing. `anywhere` because a permission box is mostly
+   paths. */
+.conversation-dialog-plan,
+.conversation-dialog-mirror {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+}
+/* One per row rather than side by side: an option's label runs to a full path
+   ("Yes, allow reading from … during this session"), and two of those beside
+   each other are two unreadable columns. */
+.conversation-dialog-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.conversation-dialog-option {
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  font-size: var(--fs-ui);
+  overflow-wrap: anywhere;
+  /* The one place a .btn-surface does not keep its muted label colour. On
+     every other one the text is a word this interface chose; here it is the
+     option itself, quoted from the box, and it is what the decision is made
+     on. Muted, that read is the hardest one in this panel. */
+  color: var(--text);
+}
+/* The two keys every box answers to, whether or not it advertises them - a
+   plan confirmation names neither and takes both. Quiet, because they are the
+   way out rather than the answer. */
+.conversation-dialog-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+.conversation-dialog-key {
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+}
 /* What Claude Code has waiting, from the last tail read of the transcript.
    A strip of its own between the stream and the composer rather than cards
    in the stream: these have not happened yet, and putting them in the
