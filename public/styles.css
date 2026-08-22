@@ -4009,10 +4009,19 @@ button { cursor: pointer; }
    overflow does not reach it) and keeps its place on the line. Measured: 30px
    over two lines when the label carried the clamp in a block of its own, 15px
    over one line here. */
-.conversation-tool-call > summary {
+.conversation-tool-call > summary,
+.conversation-tool-run > summary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* The calls inside a run, indented so the run's own line reads as the thing
+   they hang off. No box of its own: the run's summary is already the frame. */
+.conversation-tool-run-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-left: var(--space-lg);
 }
 .conversation-pre {
   margin: 4px 0 0;

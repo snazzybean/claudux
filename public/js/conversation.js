@@ -185,6 +185,20 @@ function noteNode(text) {
   return note;
 }
 
+// The calls stay foldouts of their own inside the run, so opening it changes
+// nothing about how a single call reads. The names are deduplicated because a
+// run of eight greps is one tool, and "8 tool calls · Bash" says more than the
+// same word eight times.
+function toolRunNode(event) {
+  const names = [...new Set(event.calls.map((call) => call.name))];
+  const body = document.createElement('div');
+  body.className = 'conversation-tool-run-body';
+  body.append(...event.calls.map(toolNode));
+  const node = foldout(`${event.calls.length} tool calls · ${names.join(', ')}`, body);
+  node.classList.add('conversation-tool-run');
+  return node;
+}
+
 // A run of tool calls is most of what a long turn puts on screen, and a
 // command wrapped over three lines makes the run unreadable on a phone. Its
 // own class rather than the shared summary rule: a tool's title is the one
@@ -335,6 +349,8 @@ function eventNode(event) {
     node.append(markdownNode(event.html));
   } else if (event.kind === 'thinking') {
     node.append(foldout('Thinking', markdownNode(event.html)));
+  } else if (event.kind === 'toolRun') {
+    node.append(toolRunNode(event));
   } else if (event.kind === 'tool') {
     node.append(toolNode(event));
   } else if (event.kind === 'toolResult') {
@@ -521,7 +537,51 @@ function emptyNotice(state) {
 // same name appearing turns "nothing has been written" into "cannot be
 // attributed", and without this the card would keep the first sentence.
 function contentMark(event) {
+  if (event.kind === 'toolRun') return `toolRun|${event.calls.map(contentMark).join(';')}`;
   return `${event.kind}|${event.resultLoaded ? 1 : 0}|${(event.result ?? '').length}|${(event.html ?? '').length}|${event.agentId ?? ''}|${event.agentAmbiguous ? 1 : 0}`;
+}
+
+// A run of finished tool calls becomes ONE event before the dom is brought in
+// line with the list, rather than a container the reconciler below has to
+// learn about: it keys nodes on a uuid, a container has none of its own, and
+// keying it by its first member would mean a second reconciler inside the
+// first. Grouped here, the run is an event like any other - one uuid, one
+// mark, one node.
+//
+// Three, not two: a pair costs two lines and reads as what it is, while a run
+// of ten is what buries a conversation on a phone.
+const TOOL_RUN_MIN = 3;
+
+// Only calls that have RETURNED. What the session is doing right now stays on
+// screen by itself and joins the run when it is done, which is also what keeps
+// the run's mark still while a call spins.
+function groupToolRuns(events) {
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= TOOL_RUN_MIN) {
+      out.push({
+        kind: 'toolRun',
+        uuid: run[0].uuid,
+        parentUuid: run[0].parentUuid,
+        entrypoint: run[0].entrypoint,
+        calls: run,
+      });
+    } else {
+      out.push(...run);
+    }
+    run = [];
+  };
+  for (const event of events) {
+    if (event.kind === 'tool' && event.resultLoaded) {
+      run.push(event);
+      continue;
+    }
+    flush();
+    out.push(event);
+  }
+  flush();
+  return out;
 }
 
 // The dom brought in line with state.events, node by node, instead of
@@ -553,7 +613,7 @@ function syncStream(events, pending) {
 
   const seen = new Map();
   const wanted = [];
-  for (const event of events) {
+  for (const event of groupToolRuns(events)) {
     const uuid = event.uuid ?? '';
     const nth = (seen.get(uuid) ?? 0) + 1;
     seen.set(uuid, nth);
@@ -565,6 +625,16 @@ function syncStream(events, pending) {
     }
     const node = eventNode(event);
     node.dataset.mark = mark;
+    // A rebuilt node must not close what someone has open: a run's mark changes
+    // every time the session finishes another call, so without this a run being
+    // read would shut itself. The outer foldout only - an inner one is a
+    // different call each time the run grows, and matching them up by position
+    // would be a guess.
+    if (kept) {
+      const before = kept.querySelector(':scope > details');
+      const after = node.querySelector(':scope > details');
+      if (before && after) after.open = before.open;
+    }
     wanted.push(node);
   }
   // Last, and in the order they were sent: they are the newest thing on
