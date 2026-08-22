@@ -22,6 +22,27 @@ export default [
     },
   },
   {
+    // The probes under scripts/probe/. Their own entry because the globs
+    // above end in `*.js` and every one of these is an `.mjs`, so until this
+    // block existed `eslint .` skipped them entirely - and lint plus these
+    // probes are the whole safeguard for public/.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      // Both global sets, and that is the point of the entry: a probe is a
+      // node script, but its `page.evaluate` bodies are written in the same
+      // file and run in the page. The cost is that `document` in a part that
+      // never reaches the browser goes unnoticed here.
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      'no-undef': 'error',
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
     // public/ runs in the browser. app.js and the modules under public/js/
     // are loaded via <script type="module"> and import each other.
     files: ['public/app.js', 'public/js/**/*.js'],

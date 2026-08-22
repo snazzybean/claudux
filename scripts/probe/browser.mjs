@@ -4,7 +4,7 @@
 // moves in both directions, whether dragging takes a line along, and whether
 // every window can be closed. See README.md for why this exists.
 import fs from 'node:fs';
-import { chromium } from '/root/.npm/_npx/705bc6b22212b352/node_modules/playwright/index.mjs';
+import { playwrightPath } from './paths.mjs';
 
 // The project has to be named: it is the one whose session the fixture gave
 // agents to, and no other project in the list has any. There is deliberately
@@ -17,7 +17,9 @@ if (!PROJECT) {
   process.exit(1);
 }
 const [W, H] = SIZE.split('x').map(Number);
+const exactly = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 
+const { chromium } = await import(playwrightPath());
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 const problems = [];
@@ -28,7 +30,13 @@ await page.goto(`http://127.0.0.1:${PORT}/?debug=subagents`, { waitUntil: 'netwo
 // Session rows exist only for an expanded project - a collapsed one clips
 // them away and app.js does not build them.
 await page.waitForSelector('.project-head', { timeout: 20000 });
-await page.locator('.project-head', { hasText: PROJECT }).first().click();
+// Anchored on the NAME element, not on the head: the head renders the
+// project's path beside its name, so a substring match over the whole head
+// also picks a project that merely sits under a directory of that name -
+// which the conversation fixture's own project does.
+await page.locator('.project-head')
+  .filter({ has: page.locator('.project-name', { hasText: exactly(PROJECT) }) })
+  .first().click();
 await page.waitForSelector('.session-agents-edge:not([hidden])', { timeout: 20000 });
 const count = (await page.locator('.session-agents-edge:not([hidden])').first().textContent()).trim();
 
