@@ -4482,13 +4482,40 @@ button { cursor: pointer; }
   max-width: 100%;
   object-fit: contain;
 }
+/* The field and the two controls that lie on it. Nothing sits beside it any
+   more, so it takes the whole width - what used to be a row of buttons is now
+   room reserved inside the field itself.
+
+   --controls is that room, and BOTH sides read it: the buttons are laid out
+   right-to-left inside it and the field pads by exactly the same amount. One
+   value, so text can never end up behind a button - which is the whole reason
+   this is a variable and not two numbers that agree today. */
+.conversation-field {
+  --control-size: 34px;
+  --control-inset: 4px;
+  --controls: calc(
+    2 * var(--control-size)     /* the two buttons */
+    + var(--space-sm)           /* the gap between them */
+    + var(--control-inset)      /* their distance from the edge */
+    + var(--space-sm)           /* and air, so text does not touch the first */
+  );
+  position: relative;
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+}
+/* Over the field, at its bottom edge, so they follow it as it grows with what
+   is typed rather than floating in the middle of a tall field. */
+.conversation-actions {
+  position: absolute;
+  right: var(--control-inset);
+  bottom: var(--control-inset);
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
 .conversation-input {
-  /* The basis is what decides the wrap above. Low enough that the two controls
-     left beside it - the image button and Send - stay on this line on a phone:
-     at 200px they were pushed onto one of their own, which cost a whole row of
-     height for three buttons. The field gives width rather than the layout
-     giving a line, and what it gives back it takes in height as it grows. */
-  flex: 1 1 120px;
+  flex: 1 1 auto;
   min-width: 0;
   resize: none;
   /* Against --app-height instead of vh, and here it decides the layout: the
@@ -4496,12 +4523,21 @@ button { cursor: pointer; }
      would keep claiming this share of the FULL screen and leave nothing of
      the conversation above it.
 
-     The share is smaller than it looks because the controls wrap onto a line
-     of their own on a narrow screen, and that line is paid for out of the same
-     --app-height: with the keyboard up, a long draft and a full queue box, a
-     larger share puts the composer past the bottom edge of the app. */
+     The share is smaller than it looks: the status row above and a queue box
+     are paid for out of the same --app-height, so with the keyboard up, a long
+     draft and a full queue, a larger share puts the composer past the bottom
+     edge of the app. (The controls no longer take a row of their own - they
+     lie on this field.) */
   max-height: calc(var(--app-height, 100dvh) * 0.3);
+  /* Tall enough for a control to sit inside it rather than over its top edge:
+     one button plus the inset above and below it. An empty field is that high
+     from the start, so nothing moves when the first one appears. */
+  min-height: calc(var(--control-size) + 2 * var(--control-inset));
   padding: 8px 10px;
+  /* AFTER the shorthand, which would otherwise take it back - this is the
+     room the two controls occupy, and it is what keeps text from running
+     underneath them. */
+  padding-right: var(--controls);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
@@ -4630,24 +4666,22 @@ button { cursor: pointer; }
 /* Calmer than the global focus ring, for the same reason .search-input
    replaces it: an outline around a field this size reads as a halo. */
 .conversation-input:focus-visible { outline: none; border-color: var(--accent); }
-/* Never shrinks - the field is what gives way, and then wraps. `margin-left`
-   keeps Send against the right edge in both layouts: beside the field, and on
-   a line of its own below it. */
-.conversation-actions {
-  flex: 0 0 auto;
-  margin-left: auto;
-  display: flex;
-  gap: var(--space-md);
-  align-items: center;
-}
-/* Everything else comes from .btn-quiet; only the touch target is its own. */
+/* Everything else comes from .btn-quiet; only the touch target is its own,
+   and it comes from the same value the field reserves room by. */
 .conversation-attach {
-  width: 34px;
-  height: 34px;
+  width: var(--control-size);
+  height: var(--control-size);
 }
 .conversation-attach:hover { color: var(--text); }
-/* The size .btn-accent brings along, so Stop and Send end up the same
-   height. */
+/* Square and icon-only now, the same target as the image button beside it. */
+.conversation-send {
+  width: var(--control-size);
+  height: var(--control-size);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .conversation-stop {
   padding: 9px 12px;
   font-size: var(--fs-ui);

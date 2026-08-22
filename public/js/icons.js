@@ -38,6 +38,10 @@ export const ICONS = {
   bulb: '<path d="M5.4 9.2a3.5 3.5 0 1 1 5.2 0c-.6.6-.9 1.2-1 2H6.4c-.1-.8-.4-1.4-1-2z"/><path d="M6.6 13.4h2.8"/>',
   important: '<path d="M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v5.4a1 1 0 0 1-1 1H6.6L4 13.1v-2.7h-.5a1 1 0 0 1-1-1z"/><path d="M8 5.2v2.3"/><path d="M8 9.1h.01"/>',
   forbidden: '<circle cx="8" cy="8" r="5.9"/><path d="m4.2 4.2 7.6 7.6"/>',
+  // A paper plane, outlined like everything else here: the quadrilateral is
+  // the plane, the second path the fold along its middle. It points up and to
+  // the right, so it reads as "away from here" at 14px.
+  send: '<path d="M14.4 1.6 1.9 6.7l4.5 1.9 1.9 4.5z"/><path d="M14.4 1.6 6.4 8.6"/>',
   // The one icon here that exists to move. Claude Code's status line cycles a
   // spinner through asterisks of differing arm counts, and that character
   // cannot be passed through for the reason this whole file exists - so the
