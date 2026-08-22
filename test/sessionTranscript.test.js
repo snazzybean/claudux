@@ -23,6 +23,34 @@ test('conversationEvents renders a user message as markdown', () => {
   assert.match(event.html, /<strong>styles\.css<\/strong>/);
 });
 
+// The receipt for a message sent from the view compares against this field,
+// because the html cannot answer for it: an ordered list's numbers are css
+// counters, so `1. eins` renders as text that reads `eins` and the receipt
+// said "Not confirmed" over a turn that was right there. Both shapes of user
+// content carry it, and an assistant turn carries none - nothing compares
+// against one.
+test('conversationEvents carries a user turn as written, not only as html', () => {
+  const written = '1. eins\n2. zwei';
+  const jsonl = line({
+    type: 'user', uuid: 'u1', parentUuid: null, entrypoint: 'cli',
+    message: { content: written },
+  })
+    + line({
+      type: 'user', uuid: 'u2', parentUuid: 'u1', entrypoint: 'cli',
+      message: { content: [{ type: 'text', text: written }] },
+    })
+    + line({
+      type: 'assistant', uuid: 'a1', parentUuid: 'u2', entrypoint: 'cli',
+      message: { content: [{ type: 'text', text: 'answering' }] },
+    });
+  const [fromString, fromPart, assistant] = conversationEvents(jsonl);
+  assert.equal(fromString.text, written);
+  assert.equal(fromPart.text, written);
+  assert.equal(assistant.text, undefined);
+  // The html is still the rendering, and it is what loses the numbers.
+  assert.match(fromString.html, /<ol>/);
+});
+
 test('conversationEvents keeps thinking as its own kind instead of dropping it', () => {
   const jsonl = line({
     type: 'assistant', uuid: 'a1', parentUuid: 'u1', entrypoint: 'cli',

@@ -13,6 +13,7 @@ import {
   conversationInputEl,
   conversationAttachEl,
   conversationStopEl,
+  conversationWorkingEl,
   conversationModeEl,
 } from './dom.js';
 import { checkResponse, showError, showToast } from './messages.js';
@@ -1259,7 +1260,11 @@ function reconcilePending(state, readAt) {
   }
   for (const event of state.events) {
     if (event.kind !== 'user' || event.pagedIn || !state.pending.length) continue;
-    const text = turnText(event.html);
+    // What was written, when the server sends it: rendered text loses
+    // whatever the renderer draws rather than writes, and a numbered list then
+    // reads "Not confirmed" with its own line right there. The rendered text
+    // stays as the fallback for a turn read before that field existed.
+    const text = event.text ?? turnText(event.html);
     const key = compareKey(text);
     const at = state.pending.findIndex((entry) => readAt > entry.readAt
       && !entry.known.has(event.uuid)
@@ -1724,7 +1729,11 @@ function renderQueue(state) {
 // "stop" suggests.
 function renderStop(state) {
   const waiting = waitingOf(state);
-  conversationStopEl.hidden = !state || state.gone || !isBusy();
+  // One expression for both, for the same reason isBusy has one reader: two
+  // copies would drift and then disagree about whether anything is running.
+  const running = Boolean(state) && !state.gone && isBusy();
+  conversationStopEl.hidden = !running;
+  conversationWorkingEl.hidden = !running;
   conversationStopEl.textContent = waiting.length ? 'Stop · sends the queue' : 'Stop';
   conversationStopEl.dataset.queued = waiting.length ? 'true' : 'false';
 }

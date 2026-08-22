@@ -85,13 +85,27 @@ function capPatch(patch) {
 // the structuredPatch branch, so a stray part on a diff line gets the same
 // treatment instead of being dropped along with the tool_result it rides
 // with.
+// A user turn carries what was WRITTEN beside the html, and only a user turn.
+// The receipt for a message sent from the view has to find the turn that
+// answers for it, and comparing against rendered text loses whatever the
+// renderer draws rather than writes: an ordered list's numbers are css
+// counters and a link's target disappears into an href, so a numbered list
+// read as "not confirmed" with its own line right there in the file. No cap
+// on it - the html beside it is the same content with tags around it, so this
+// field is the smaller half of what the turn already costs.
+function turnEvent(entry, text) {
+  const kind = entry.type === 'assistant' ? 'assistant' : 'user';
+  return {
+    kind,
+    ...base(entry),
+    html: renderMarkdown(text),
+    ...(kind === 'user' ? { text } : {}),
+  };
+}
+
 function pushPart(events, byToolUseId, entry, part) {
   if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-    events.push({
-      kind: entry.type === 'assistant' ? 'assistant' : 'user',
-      ...base(entry),
-      html: renderMarkdown(part.text),
-    });
+    events.push(turnEvent(entry, part.text));
   } else if (part?.type === 'thinking' && typeof part.thinking === 'string' && part.thinking.trim()) {
     events.push({ kind: 'thinking', ...base(entry), html: renderMarkdown(part.thinking) });
   } else if (part?.type === 'image') {
@@ -193,7 +207,7 @@ export function conversationEvents(jsonlText) {
     const content = entry?.message?.content;
     if (typeof content === 'string') {
       if (!content.trim()) continue;
-      events.push({ kind: entry.type === 'assistant' ? 'assistant' : 'user', ...base(entry), html: renderMarkdown(content) });
+      events.push(turnEvent(entry, content));
       continue;
     }
     if (!Array.isArray(content)) continue;
