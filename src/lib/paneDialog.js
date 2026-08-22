@@ -104,6 +104,22 @@ function findLastOptionRun(lines) {
 // which is exactly why indentation cannot be the signal that decides this.
 const WRAP_SLACK = 4;
 
+// The `❯` that marks the selected option is the same glyph Claude Code puts
+// in front of a SENT message, and a message's continuation lines sit at
+// column 0 after a hard line break - so `1.`/`2.` typed as a message forms a
+// valid run, and the blank line drawn after every message supplies the gap
+// above. What separates the two is underneath: a box takes the input line
+// away while it stands, so a `❯` line below the run means the run is a
+// message with the input line waiting under it.
+//
+// Neither obvious alternative works. The footer cannot be required - a plan
+// confirmation at 40 columns carries none, and reading it is what keeps that
+// box recognised. Nor can the indent: a real `AskUserQuestion` box puts its
+// options at column 0 exactly as a message does.
+function promptLineBelow(lines, index) {
+  return lines.slice(index + 1).some((line) => PROMPT_LINE.test(line));
+}
+
 export function readDialog(paneText) {
   const text = String(paneText ?? '');
   const lines = text.split('\n');
@@ -127,7 +143,8 @@ export function readDialog(paneText) {
   const gap = blankGapAfter(lines, runEndsAt);
   const runEndsInABox = gap >= 1;
   const hasSelected = run.some((entry) => entry.type === 'option' && entry.selected)
-    && runEndsInABox;
+    && runEndsInABox
+    && !promptLineBelow(lines, runEndsAt);
 
   // No selected marker inside the run means it is not the active box -
   // most likely a numbered list sitting in scrollback, or text someone

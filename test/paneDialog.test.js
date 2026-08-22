@@ -568,6 +568,28 @@ test('A5: a numbered list typed as a message is not a dialog either', () => {
   assert.deepEqual(dialog.options, []);
 });
 
+// The same list once it has been SENT, which is where the two tests above
+// miss: Claude Code draws a submitted message with its own `❯ ` prefix, puts
+// the continuation lines of a hard line break at column 0 rather than
+// indenting them, and follows the whole message with a blank line. That
+// blank line is exactly the gap `runEndsInABox` asks for, so the message
+// reads as a box and the view locks its composer behind a card nobody can
+// answer. Derived from a real pane capture, not constructed.
+const A5_SENT_LIST_RAW = A5IDLE_RAW.replace(
+  '❯ \n',
+  '❯ 1. first thing\n2. second thing\n\n  Read 1 file\n\n❯ \n',
+);
+
+test('A5: a numbered list already SENT is not a dialog either', () => {
+  const clean = sanitizePaneText(A5_SENT_LIST_RAW);
+  const dialog = readDialog(clean);
+  assert.equal(dialog.open, false);
+  assert.deepEqual(dialog.options, []);
+  // The input line is back under the message, which is the whole signal:
+  // while a box really stands there is none (see A3b).
+  assert.equal(promptIsEmpty(clean), true);
+});
+
 // Not from a real capture: no measured box lacks numbered options
 // entirely, but the footer is still the only path to `open` for a shape
 // this module does not otherwise recognise, and that escape hatch is
