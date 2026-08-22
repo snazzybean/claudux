@@ -4411,8 +4411,15 @@ button { cursor: pointer; }
    was a third vocabulary for a state the app already speaks about. */
 .conversation-working {
   flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
   font-size: var(--fs-ui);
   color: var(--text-muted);
+}
+.conversation-working-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4421,12 +4428,45 @@ button { cursor: pointer; }
    it: the conversation above must not jump every time a turn starts and ends.
    A no-break space rather than a min-height, so the reserved height is exactly
    one line of this font whatever the scale says. */
-.conversation-working:empty::before { content: '\00a0'; }
+.conversation-working-text:empty::before { content: '\00a0'; }
+/* The spark stands in for the spinner character Claude Code cycles, which
+   cannot be passed through (see icons.js). Its two groups of arms twinkle
+   against each other on the same step, and the whole thing turns an eighth of
+   a revolution per step - an eighth is the symmetry of eight arms, so it comes
+   back to itself instead of visibly spinning. Steps rather than a smooth
+   sweep: what it stands in for is a character being replaced. */
+.conversation-working[data-working="true"] .conversation-spark {
+  animation: spark-turn 1.6s steps(1) infinite;
+}
+.conversation-working[data-working="true"] .spark-axis {
+  animation: spark-axis 1.6s steps(1) infinite;
+}
+.conversation-working[data-working="true"] .spark-diag {
+  animation: spark-diag 1.6s steps(1) infinite;
+}
+/* Not while nothing runs: there the line is a fact, and the arms stand still
+   at their full set. */
+.conversation-working[data-working="false"] .conversation-spark { opacity: 0.55; }
+@keyframes spark-turn {
+  0% { transform: rotate(0deg); }
+  50% { transform: rotate(22.5deg); }
+  100% { transform: rotate(45deg); }
+}
+@keyframes spark-axis {
+  0%, 50% { opacity: 1; }
+  75% { opacity: 0.35; }
+  100% { opacity: 1; }
+}
+@keyframes spark-diag {
+  0% { opacity: 0.35; }
+  25%, 75% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
 /* Only while a turn is in flight: the cone of light this view already runs
    across a working session's title in the sidebar, at its cadence. Afterwards
    the same line says how long it took, and then it is a fact rather than
    something in progress. */
-.conversation-working[data-working="true"] {
+.conversation-working[data-working="true"] .conversation-working-text {
   background-image: linear-gradient(
     100deg,
     var(--text-muted) 35%,
@@ -4443,10 +4483,18 @@ button { cursor: pointer; }
    freeze the gradient mid-sweep and leave the words half muted. Its own way
    out, as the two rules above it have. */
 @media (prefers-reduced-motion: reduce) {
-  .conversation-working[data-working="true"] {
+  .conversation-working[data-working="true"] .conversation-working-text {
     animation: none;
     background-image: none;
     color: var(--text-muted);
+  }
+  /* The spark holds still with every arm shown, which still says the line is
+     about something in progress by being brighter than the resting state. */
+  .conversation-working[data-working="true"] .conversation-spark,
+  .conversation-working[data-working="true"] .spark-axis,
+  .conversation-working[data-working="true"] .spark-diag {
+    animation: none;
+    opacity: 1;
   }
 }
 .conversation-input::placeholder { color: var(--text-muted); }

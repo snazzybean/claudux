@@ -40,6 +40,7 @@ export const conversationInputEl = document.getElementById('conversationInput');
 export const conversationAttachEl = document.getElementById('conversationAttach');
 export const conversationStopEl = document.getElementById('conversationStop');
 export const conversationWorkingEl = document.getElementById('conversationWorking');
+export const conversationWorkingTextEl = document.getElementById('conversationWorkingText');
 export const conversationModeEl = document.getElementById('conversationMode');
 export const conversationSendEl = document.getElementById('conversationSend');
 export const themeToggleEl = document.getElementById('themeToggle');

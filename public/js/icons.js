@@ -38,6 +38,13 @@ export const ICONS = {
   bulb: '<path d="M5.4 9.2a3.5 3.5 0 1 1 5.2 0c-.6.6-.9 1.2-1 2H6.4c-.1-.8-.4-1.4-1-2z"/><path d="M6.6 13.4h2.8"/>',
   important: '<path d="M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v5.4a1 1 0 0 1-1 1H6.6L4 13.1v-2.7h-.5a1 1 0 0 1-1-1z"/><path d="M8 5.2v2.3"/><path d="M8 9.1h.01"/>',
   forbidden: '<circle cx="8" cy="8" r="5.9"/><path d="m4.2 4.2 7.6 7.6"/>',
+  // The one icon here that exists to move. Claude Code's status line cycles a
+  // spinner through asterisks of differing arm counts, and that character
+  // cannot be passed through for the reason this whole file exists - so the
+  // arms are drawn instead, in two groups the stylesheet can twinkle against
+  // each other (see .conversation-spark). Four short arms rather than the
+  // glyph's six: at 16px with a 1.3 stroke, six read as a blob.
+  spark: '<g class="spark-axis"><path d="M8 2.6v3.1"/><path d="M8 10.3v3.1"/><path d="M2.6 8h3.1"/><path d="M10.3 8h3.1"/></g><g class="spark-diag"><path d="M4.2 4.2 6.3 6.3"/><path d="M9.7 9.7 11.8 11.8"/><path d="M11.8 4.2 9.7 6.3"/><path d="M6.3 9.7 4.2 11.8"/></g>',
   hourglass: '<path d="M4.4 2.4h7.2"/><path d="M4.4 13.6h7.2"/><path d="M5.4 2.4v2.4L8 7.6l2.6-2.8V2.4"/><path d="M5.4 13.6v-2.4L8 8.4l2.6 2.8v2.4"/>',
   key: '<circle cx="10.5" cy="5.5" r="2.9"/><path d="M8.4 7.6 2.7 13.3"/><path d="m4.5 11.5 1.6 1.6"/>',
   person: '<circle cx="8" cy="5.4" r="2.6"/><path d="M2.9 13.4a5.1 5.1 0 0 1 10.2 0"/>',

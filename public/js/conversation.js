@@ -14,10 +14,11 @@ import {
   conversationAttachEl,
   conversationStopEl,
   conversationWorkingEl,
+  conversationWorkingTextEl,
   conversationModeEl,
 } from './dom.js';
 import { checkResponse, showError, showToast } from './messages.js';
-import { fillAlertIcons } from './icons.js';
+import { fillAlertIcons, svgNode } from './icons.js';
 import { pasteTextIntoTerminal, sendKey } from './terminal.js';
 
 // One state per session, so a tab switch comes back where it left off - the
@@ -1817,8 +1818,16 @@ function renderQueue(state) {
 // ends. An absent reading leaves the last line standing rather than blanking
 // it - the same rule the card follows for a read that failed.
 function renderStatus(status) {
-  conversationWorkingEl.textContent = status?.text ?? '';
+  // The text in a child of its own: the cone of light is a gradient clipped to
+  // text with the text itself transparent, and an svg inheriting that would
+  // vanish with it.
+  conversationWorkingTextEl.textContent = status?.text ?? '';
   conversationWorkingEl.dataset.working = status?.working ? 'true' : 'false';
+  // Drawn once, on the first line there is anything to say, and kept: the
+  // spark twinkles from css, so nothing here has to touch it again.
+  if (status?.text && !conversationWorkingEl.querySelector('.conversation-spark')) {
+    conversationWorkingEl.prepend(svgNode('spark', 'icon-symbol conversation-spark'));
+  }
 }
 
 function renderStop(state) {
