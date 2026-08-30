@@ -182,8 +182,12 @@ enable --now claudux`. No macOS equivalent is included yet; a launchd agent
 would cover the same need.
 
 The reaper ends tmux sessions nobody is watching — but only its own, only
-without an attached client, without running child processes, and only if they
-haven't been protected in the interface. Any one of those spares a session.
+without an attached client, only while no child process younger than that
+deadline is still running in them, and only if they haven't been protected in
+the interface. Any one of those spares a session. The age is what separates a
+background job from a permanent helper: an MCP server is a child of `claude`
+for as long as the session lives, so without the cap a session configured
+with one could never be ended.
 Ending one closes the terminal, not the conversation: Claude Code's history
 stays, and the session resumes where it left off.
 
