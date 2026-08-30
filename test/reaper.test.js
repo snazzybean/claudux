@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setMeta } from '../src/lib/sessionMeta.js';
-import { findReapable, hasLiveChildrenForSession, buildIsUnused, startReaperInterval } from '../src/lib/reaper.js';
+import { findReapable, hasLiveChildrenForSession, buildIsUnused, startReaperInterval, buildIdleSince, recordAttachSightings, processStartEpoch } from '../src/lib/reaper.js';
 import { setRemainOnExit, listTmuxSessions } from '../src/lib/tmuxManager.js';
 
 test('findReapable skips attached sessions', async () => {
@@ -543,4 +543,139 @@ test('startReaperInterval: stop() prevents further ticks', (t) => {
   stop();
   t.mock.timers.tick(5000);
   assert.equal(calls, 0);
+});
+
+// --- The clock: which timestamp does "idle" actually count from? ---
+//
+// `session_activity` measures terminal output, not use. Measured against
+// the running server, it was wrong in BOTH directions: a session whose last
+// conversation entry was three days old reported 25h, and one idle for 21h
+// reported seconds. What it tracks in practice is the last attach - which is
+// only half the question the reaper asks.
+
+test('findReapable counts from the injected clock, not from activityEpoch', async () => {
+  const sessions = [{ name: '11111111-1111-1111-1111-111111111111', activityEpoch: 99999, attached: false }];
+  const result = await findReapable(sessions, {
+    nowEpoch: 100000,
+    idleThresholdSec: 10,
+    hasLiveChildren: async () => false,
+    // Fresh by the old clock, long idle by the new one.
+    idleSinceEpoch: () => 0,
+  });
+  assert.deepEqual(result, ['11111111-1111-1111-1111-111111111111']);
+});
+
+test('findReapable without idleSinceEpoch behaves exactly as before', async () => {
+  const sessions = [{ name: '11111111-1111-1111-1111-111111111111', activityEpoch: 99995, attached: false }];
+  assert.deepEqual(
+    await findReapable(sessions, { nowEpoch: 100000, idleThresholdSec: 10, hasLiveChildren: async () => false }),
+    [],
+  );
+});
+
+// session_activity moves with any output in the pane, so it already covers
+// work and attaches alike. What it misses is an attach during which nothing
+// was drawn - an idle session left open in a tab. Its timestamp then still
+// points at the START of that attach.
+test('buildIdleSince: without a sighting the old clock is unchanged', () => {
+  const idleSince = buildIdleSince({ attachSeen: new Map() });
+  assert.equal(idleSince({ name: 's', activityEpoch: 123456 }), 123456);
+});
+
+test('buildIdleSince: a session seen attached counts from that sighting, not from the start of the attach', () => {
+  const attachSeen = new Map([['s', 499000]]);
+  assert.equal(buildIdleSince({ attachSeen })({ name: 's', activityEpoch: 200000 }), 499000);
+});
+
+// The sightings may only ever push the deadline later. If a stale one could
+// pull it forward, the clock would end sessions EARLIER than today - and
+// this whole change is meant to leave that direction untouched.
+test('buildIdleSince: a sighting never moves the deadline earlier than the old clock', () => {
+  const attachSeen = new Map([['s', 100]]);
+  assert.equal(buildIdleSince({ attachSeen })({ name: 's', activityEpoch: 499000 }), 499000);
+});
+
+test('recordAttachSightings notes attached sessions and forgets ones that are gone', () => {
+  const seen = new Map([['old', 1]]);
+  recordAttachSightings([{ name: 'a', attached: true }, { name: 'b', attached: false }], 999, seen);
+  assert.equal(seen.get('a'), 999);
+  assert.equal(seen.has('b'), false);
+  assert.equal(seen.has('old'), false, 'a session that no longer exists must not linger');
+});
+
+// --- The cap: how long may a child process keep a session alive? ---
+//
+// An MCP server is a permanent child of `claude` itself - the
+// pane process IS claude, with no shell in between. It lives as long as the
+// session does, no matter whether any work is happening, so "does claude
+// have any child?" was permanently true for every session configured with
+// one, and the child criterion never let such a session go.
+//
+// The cap settles that without naming any process: a child only counts as
+// running work while it is younger than the idle threshold. An MCP server
+// is always as old as its session, so by the time the session is idle
+// enough to be considered it is always over the cap.
+
+test('processStartEpoch reads the start time from field 22, past a comm containing spaces and brackets', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reaper-proc-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, '4242'));
+  // Field 2 is "(weird ) name)" - splitting on spaces from the left, or on
+  // the FIRST ')', would read the wrong field.
+  // The line is written out as "<pid> (<comm>) <state> <field 4> <field 5> ...",
+  // so this array starts at field 4 and field 22 sits at index 18.
+  const fields = Array.from({ length: 50 }, (_, i) => String(i + 4));
+  fields[22 - 4] = '360000'; // 360000 ticks / 100 USER_HZ = 3600s after boot
+  fs.writeFileSync(path.join(dir, '4242', 'stat'), `4242 (weird ) name) S ${fields.join(' ')}\n`);
+  assert.equal(await processStartEpoch(4242, { procRoot: dir, bootEpoch: 1000 }), 1000 + 3600);
+});
+
+test('processStartEpoch returns null for an unreadable process instead of throwing', async () => {
+  assert.equal(await processStartEpoch(999999, { procRoot: '/nonexistent-proc', bootEpoch: 0 }), null);
+});
+
+test('hasLiveChildrenForSession: a child older than the cap no longer protects the session', async () => {
+  const sessionName = crypto.randomUUID();
+  assert.ok(sessionName, 'a session name must never be empty - an empty tmux target hits the CURRENT session');
+  try {
+    execFileSync('tmux', ['new-session', '-d', '-s', sessionName, 'sleep 3600 & wait']);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Unchanged default: any child protects.
+    assert.equal(await hasLiveChildrenForSession(sessionName), true);
+    // The child is seconds old, so a generous cap still protects.
+    assert.equal(await hasLiveChildrenForSession(sessionName, { maxChildAgeSec: 3600 }), true);
+    // With a cap of 0 every child counts as too old - the session is no
+    // longer protected by it.
+    assert.equal(await hasLiveChildrenForSession(sessionName, { maxChildAgeSec: 0 }), false);
+  } finally {
+    try {
+      execFileSync('tmux', ['kill-session', '-t', `=${sessionName}`]);
+    } catch {
+      // Session may already be gone - not a blocker for the test itself.
+    }
+  }
+});
+
+// The module's stance is fail-safe throughout: a state it cannot determine
+// must not lead to a kill. Reading a child's age introduces a new way to
+// fail (the process is gone between listing and reading), and that one has
+// to land on "young", i.e. protecting.
+test('hasLiveChildrenForSession: a child whose age cannot be read still protects', async () => {
+  const sessionName = crypto.randomUUID();
+  assert.ok(sessionName);
+  try {
+    execFileSync('tmux', ['new-session', '-d', '-s', sessionName, 'sleep 3600 & wait']);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    assert.equal(
+      await hasLiveChildrenForSession(sessionName, { maxChildAgeSec: 0, bootEpoch: null }),
+      true,
+      'without a boot time no age can be computed - that must spare, not kill',
+    );
+  } finally {
+    try {
+      execFileSync('tmux', ['kill-session', '-t', `=${sessionName}`]);
+    } catch {
+      // Session may already be gone - not a blocker for the test itself.
+    }
+  }
 });

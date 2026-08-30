@@ -1,8 +1,8 @@
 // Idle session reaper: kills tmux sessions that (a) nobody has attached to
 // anymore, (b) have been idle long enough AND (c) have no live child
-// process in the pane (e.g. a background task). All criteria must apply -
-// each one individually spares a session (fail-safe: when in doubt, don't
-// kill).
+// process in the pane that is younger than the idle threshold (e.g. a
+// background task). All criteria must apply - each one individually spares
+// a session (fail-safe: when in doubt, don't kill).
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -56,6 +56,10 @@ export async function findReapable(
     isUnused = () => false,
     shortIdleThresholdSec = idleThresholdSec,
     loginIdleThresholdSec = null,
+    // Which timestamp does "idle" count from? The default is the old clock,
+    // so a forgotten parameter changes nothing - same reasoning as
+    // isProtected/isUnused above.
+    idleSinceEpoch = (s) => s.activityEpoch,
   },
 ) {
   const reapable = [];
@@ -77,7 +81,7 @@ export async function findReapable(
       : isUnused(s.name)
         ? Math.min(shortIdleThresholdSec, idleThresholdSec)
         : idleThresholdSec;
-    if (nowEpoch - s.activityEpoch < threshold) continue;
+    if (nowEpoch - idleSinceEpoch(s) < threshold) continue;
     if (isProtected(s.name)) continue;
     // hasLiveChildren protects sessions with background jobs. For login
     // sessions that's backwards: there, `claude setup-token` itself is the
@@ -93,6 +97,15 @@ export async function findReapable(
 // Checks whether ANY pane of the session still has live child processes,
 // e.g. a background job. A single such pane spares the session.
 //
+// `maxChildAgeSec` caps how long that lasts. The pane process IS `claude`,
+// with no shell in between, so an MCP server configured for the session is
+// a permanent child of it - which made "does claude have any child?"
+// permanently true, and no session with one could ever be reaped. The cap
+// separates the two without naming any process: work in flight is younger
+// than the idle threshold, while an MCP server is always as old as its own
+// session and therefore over the cap by the time the session is idle enough
+// to be considered.
+//
 // `-s` queries ALL panes of the session - without it, tmux only returns the
 // active window, and a pane with a running child would go undetected. The
 // search goes per PID through /proc/<pid>/task/<tid>/children for EVERY
@@ -100,7 +113,16 @@ export async function findReapable(
 // main TID.
 // `procRoot` exists so the non-Linux path is testable on Linux; nothing in
 // production passes it.
-export async function hasLiveChildrenForSession(sessionName, { procRoot = '/proc' } = {}) {
+export async function hasLiveChildrenForSession(sessionName, {
+  procRoot = '/proc',
+  // How long a child may keep its session alive. `null` means "forever",
+  // which is the behaviour this function had before the cap existed.
+  maxChildAgeSec = null,
+  nowEpoch = Math.floor(Date.now() / 1000),
+  // Passed in only by the test that needs an unreadable boot time;
+  // `undefined` means "read it from procRoot", `null` means "unavailable".
+  bootEpoch,
+} = {}) {
   const panePids = await new Promise((resolve) => {
     const proc = spawn('tmux', ['list-panes', '-s', '-t', tmuxTarget.session(sessionName), '-F', '#{pane_pid}']);
     let out = '';
@@ -108,12 +130,26 @@ export async function hasLiveChildrenForSession(sessionName, { procRoot = '/proc
     proc.on('close', () => resolve(out.trim().split('\n').filter(Boolean)));
     proc.on('error', () => resolve([]));
   });
+  const boot = bootEpoch === undefined ? await readBootEpoch(procRoot) : bootEpoch;
   for (const panePid of panePids) {
     try {
       const taskDirs = await fs.readdir(`${procRoot}/${panePid}/task`);
       for (const tid of taskDirs) {
         const children = await fs.readFile(`${procRoot}/${panePid}/task/${tid}/children`, 'utf8');
-        if (children.trim().length > 0) return true;
+        const childPids = children.trim().split(/\s+/).filter(Boolean);
+        if (childPids.length === 0) continue;
+        if (maxChildAgeSec === null) return true;
+        // An age that cannot be determined counts as young, i.e. it spares -
+        // same fail-safe stance as the missing-/proc branch below. Reading
+        // an age is a new way to fail (no boot time, or the process gone
+        // between listing and reading), and it must not become a new way to
+        // kill.
+        if (boot === null) return true;
+        for (const childPid of childPids) {
+          const startedAt = await processStartEpoch(childPid, { procRoot, bootEpoch: boot });
+          if (startedAt === null) return true;
+          if (nowEpoch - startedAt <= maxChildAgeSec) return true;
+        }
       }
     } catch {
       // Two different failures land here: the process is gone (then this pane
@@ -167,19 +203,94 @@ export function buildIsUnused({ claudeHome, dataDir }) {
   };
 }
 
+// Sessions seen attached, by name. `session_last_attached` marks the START
+// of an attach, not its end, so a tab left open all day would otherwise die
+// the moment it is closed rather than four hours later. Each tick records
+// what it saw; that sighting becomes a floor under the clock.
+//
+// In memory on purpose, like presence.js: after a restart the value falls
+// back to tmux's own timestamp, which errs towards sparing.
+const attachSeen = new Map();
+
+export function recordAttachSightings(sessions, nowEpoch, seen = attachSeen) {
+  for (const s of sessions) if (s.attached) seen.set(s.name, nowEpoch);
+  const alive = new Set(sessions.map((s) => s.name));
+  for (const name of seen.keys()) if (!alive.has(name)) seen.delete(name);
+  return seen;
+}
+
+// Builds the "how long has nothing happened here?" clock.
+//
+// `session_activity` is the honest half of that question: it moves with any
+// output in the pane, so work shows up in it, and so does an attach. What
+// it cannot see is an attach during which NOTHING was drawn - a tab left
+// open all day on an idle session. Its timestamp then still points at the
+// start of the attach, and closing the tab would make the session reapable
+// on the spot instead of four hours later.
+//
+// Hence the max: the sightings only ever move the deadline later, never
+// earlier, so this cannot end a session sooner than the old clock would.
+export function buildIdleSince({ attachSeen: seen = attachSeen } = {}) {
+  return (s) => Math.max(s.activityEpoch, seen.get(s.name) ?? 0);
+}
+
+// Start time of a process as an epoch, read from /proc/<pid>/stat field 22
+// plus the boot time from /proc/stat.
+//
+// Deliberately NOT the mtime of /proc/<pid>, which looks like the same
+// thing and isn't: measured against a running MCP server it was 10.7 hours
+// off, because the directory's timestamp moves with the process rather than
+// marking its birth.
+//
+// The 100 is USER_HZ, the unit /proc reports these ticks in. It is a
+// constant of the kernel's userspace ABI, not of the configured HZ.
+export async function processStartEpoch(pid, { procRoot = '/proc', bootEpoch }) {
+  try {
+    const stat = await fs.readFile(`${procRoot}/${pid}/stat`, 'utf8');
+    // comm (field 2) may contain spaces and parentheses, so everything up to
+    // the LAST ')' is skipped rather than split on.
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const ticks = Number(fields[19]);
+    if (!Number.isFinite(ticks)) return null;
+    return bootEpoch + Math.floor(ticks / 100);
+  } catch {
+    return null;
+  }
+}
+
+async function readBootEpoch(procRoot) {
+  try {
+    const stat = await fs.readFile(`${procRoot}/stat`, 'utf8');
+    const line = stat.split('\n').find((l) => l.startsWith('btime '));
+    const epoch = Number(line?.slice(6));
+    return Number.isFinite(epoch) ? epoch : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runReaperOnce({ idleThresholdMs, shortIdleThresholdMs, loginIdleThresholdMs, claudeHome, dataDir }) {
   const sessions = await listTmuxSessions();
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  const idleThresholdSec = Math.floor(idleThresholdMs / 1000);
+  recordAttachSightings(sessions, nowEpoch);
   const toKill = await findReapable(sessions, {
-    nowEpoch: Math.floor(Date.now() / 1000),
-    idleThresholdSec: Math.floor(idleThresholdMs / 1000),
-    hasLiveChildren: hasLiveChildrenForSession,
+    nowEpoch,
+    idleThresholdSec,
+    // A child only counts as running work while it is younger than the idle
+    // threshold. Past that it is a deliberately long-lived process, not a
+    // task in flight - and an MCP server, which is always as old as its own
+    // session, is over the cap by the time the session is idle enough to be
+    // considered at all.
+    hasLiveChildren: (name) => hasLiveChildrenForSession(name, { maxChildAgeSec: idleThresholdSec, nowEpoch }),
+    idleSinceEpoch: buildIdleSince(),
     // Without dataDir, stick to prior behavior instead of silently
     // sparing everything.
     isProtected: dataDir ? (name) => getMeta(dataDir, name)?.protected === true : undefined,
     isUnused: buildIsUnused({ claudeHome, dataDir }),
     shortIdleThresholdSec: shortIdleThresholdMs
       ? Math.floor(shortIdleThresholdMs / 1000)
-      : Math.floor(idleThresholdMs / 1000),
+      : idleThresholdSec,
     loginIdleThresholdSec: loginIdleThresholdMs ? Math.floor(loginIdleThresholdMs / 1000) : null,
   });
   // A single failing kill-session call must not abort the entire run: the
