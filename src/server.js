@@ -2,6 +2,7 @@ import express from 'express';
 import compression from 'compression';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { minifyStatic } from './lib/staticAssets.js';
 import { loadConfig } from './config.js';
 import { projectsRouter } from './routes/projects.js';
@@ -100,6 +101,24 @@ export function createApp(config, { claudeCodeUpdateJob, browseStartDirFn } = {}
       return compression.filter(req, res);
     },
   }));
+  // Mermaid is the one library the browser loads itself, and it is served
+  // from node_modules rather than copied into public/: the ESM build is code
+  // split, so a flowchart pulls the entry plus the chunks it needs instead of
+  // the 3.5 MB the single-file bundle would cost. Mounted ahead of
+  // minifyStatic because none of this wants a second minifier pass, and
+  // without a max-age because the chunk names are unversioned in the URL - a
+  // cached entry outliving its chunks across an upgrade would ask for files
+  // that no longer exist.
+  // Guarded because this is the only mount that resolves out of node_modules:
+  // an install that arrives without it should cost the diagrams, not the
+  // interface - the same reasoning staticAssets.js gives for falling back to
+  // the original bytes.
+  try {
+    const mermaidDir = path.dirname(fileURLToPath(import.meta.resolve('mermaid')));
+    app.use('/vendor/mermaid', express.static(mermaidDir, { index: false }));
+  } catch {
+    console.warn('mermaid is not installed - diagrams stay source text');
+  }
   app.use(minifyStatic(publicDir));
   app.use(express.static(publicDir));
 

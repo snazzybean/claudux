@@ -3529,6 +3529,23 @@ button { cursor: pointer; }
   overflow-x: auto;
 }
 .markdown-body pre code { padding: 0; background: transparent; font-size: var(--fs-ui); }
+/* A mermaid fence before its diagram exists - and source that doesn't parse,
+   which ends in the same place: the rule above already draws it as the code
+   block it still is. Once js/mermaid.js has put an svg in, the container is a
+   frame for a picture and gives up the code block's surface. */
+.markdown-body pre.mermaid[data-mermaid-rendered] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+/* Centred by auto margins rather than by text-align or a flex box: a diagram
+   wider than the column keeps its left edge at the start of the scroll area
+   this way, while both of the others push it out of reach. */
+.markdown-body pre.mermaid[data-mermaid-rendered] svg {
+  display: block;
+  margin-inline: auto;
+  height: auto;
+}
 .markdown-body blockquote {
   margin: 0 0 1em;
   padding: 2px 0 2px 12px;

@@ -320,3 +320,36 @@ test('renderMarkdown keeps a fragment link, which is what heading ids are for', 
   assert.ok(html.includes('href="#security"'));
   assert.ok(html.includes('id="security"'));
 });
+
+// A mermaid fence is source for a renderer that only exists in the browser,
+// so the server's job is to hand it over untouched rather than to guess a
+// language for it. Highlighting it would be wrong twice: hljs knows no
+// mermaid and falls back to highlightAuto, and the spans it inserts would
+// end up in the diagram source.
+test('renderMarkdown hands a mermaid fence over as source, not as a highlighted block', () => {
+  const html = renderMarkdown('```mermaid\ngraph TD;\n  A-->B;\n```\n', CONTEXT);
+
+  assert.ok(html.includes('<pre class="mermaid">'));
+  assert.ok(html.includes('graph TD;'));
+  assert.ok(html.includes('A--&gt;B;'));
+  assert.ok(!html.includes('hljs'));
+});
+
+// The client reads the container's text and only then renders it. Whatever
+// stands in the fence must therefore arrive as text, or the document would
+// carry markup that no sanitizer has seen.
+test('renderMarkdown escapes a mermaid fence that tries to leave its container', () => {
+  const html = renderMarkdown('```mermaid\n</pre><script>alert(1)</script>\n```\n', CONTEXT);
+
+  assert.ok(!/<script/i.test(html));
+  assert.ok(html.includes('&lt;/pre&gt;'));
+  assert.ok(html.includes('alert(1)'));
+});
+
+// The info string carries more than the language on a fence like
+// ```mermaid theme=dark - and the first word is what decides.
+test('renderMarkdown recognises a mermaid fence with a trailing info string', () => {
+  const html = renderMarkdown('```mermaid  extra\ngraph TD;\n```\n', CONTEXT);
+
+  assert.ok(html.includes('<pre class="mermaid">'));
+});

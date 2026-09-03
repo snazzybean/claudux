@@ -11,6 +11,7 @@ import { showToast, checkResponse } from './messages.js';
 import { svg, fillAlertIcons } from './icons.js';
 import { buildRow, buildTree, formatSize } from './fileTree.js';
 import { makeResizable } from './resizer.js';
+import { renderMermaid } from './mermaid.js';
 
 // Last opened directory per project: switching tabs returns there, not to
 // the root.
@@ -558,6 +559,7 @@ function buildFileContent() {
     // has passed a whitelist there, script and event handlers are gone.
     box.innerHTML = view.html;
     fillAlertIcons(box);
+    renderMermaid(box);
     box.addEventListener('click', (e) => {
       const link = e.target.closest('a[data-file-path]');
       if (!link) return;

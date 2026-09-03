@@ -71,6 +71,16 @@ export function renderCode(sourceText, { language } = {}) {
   return `<pre class="code-block" style="--number-column: ${columnWidth}"><code class="hljs">${lines}</code></pre>`;
 }
 
+// The fence whose source belongs to the browser rather than to
+// highlight.js. Two places have to agree on it - the highlight callback that
+// must not touch it, and the renderer that emits its container - so the name
+// of the language and the way it is read off the info string live here.
+const MERMAID_LANG = 'mermaid';
+
+function fenceLanguage(infoString) {
+  return (infoString || '').trim().split(/\s+/)[0];
+}
+
 // Allowed targets for links. Everything else - `javascript:` above all -
 // gets output as plain text: marked no longer filters this itself since
 // v5, a `[click](javascript:alert(1))` would otherwise produce a working
@@ -193,6 +203,11 @@ export function renderMarkdown(sourceText, { projectId, directoryRel = '' } = {}
       emptyLangClass: 'hljs',
       langPrefix: 'hljs language-',
       highlight(code, lang) {
+        // Returning the source unchanged is what keeps it out of the token:
+        // marked-highlight only replaces the token's text when the highlight
+        // function hands back something different. So the code renderer
+        // below still sees the raw diagram, not spans.
+        if (lang === MERMAID_LANG) return code;
         return highlightCode(code, lang && hljs.getLanguage(lang) ? lang : null);
       },
     }),
@@ -208,6 +223,16 @@ export function renderMarkdown(sourceText, { projectId, directoryRel = '' } = {}
       // its own closes the first and drops the second.
       html(token) {
         return token.text;
+      },
+      // A mermaid fence carries source for a renderer that only exists in the
+      // browser (public/js/mermaid.js), so it is handed over as text instead
+      // of being highlighted - hljs knows no mermaid and would fall back to
+      // highlightAuto, whose spans would then land in the diagram source.
+      // `false` passes every other fence down to markedHighlight, which
+      // registered its own code renderer before this one.
+      code(token) {
+        if (fenceLanguage(token.lang) !== MERMAID_LANG) return false;
+        return `<pre class="mermaid">${escapeHtml(token.text)}</pre>\n`;
       },
       // marked emits no ids of its own, which leaves every [text](#anchor) in
       // a README pointing at nothing.

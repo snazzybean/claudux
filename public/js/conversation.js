@@ -23,6 +23,7 @@ import {
   conversationModeEl,
 } from './dom.js';
 import { checkResponse, showError, showToast } from './messages.js';
+import { renderMermaid } from './mermaid.js';
 import { fillAlertIcons, svgNode } from './icons.js';
 import { pasteTextIntoTerminal, sendKey } from './terminal.js';
 
@@ -157,6 +158,11 @@ function markdownNode(html) {
   const body = document.createElement('div');
   body.className = 'markdown-body';
   body.append(template.content);
+  // Started here although the node is still detached: mermaid works
+  // asynchronously and checks before writing whether its element is still in
+  // the document, so a turn the reconciler drops in the meantime is not a
+  // case that needs handling here.
+  renderMermaid(body);
   return body;
 }
 

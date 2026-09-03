@@ -47,7 +47,9 @@ existing ones. Alongside that:
   ntfy or webhook — quiet while it is still working, and adjustable per
   project.
 - **A usage popover** with context level and quota.
-- **The project's files** in a second tab, readable and editable.
+- **The project's files** in a second tab, readable and editable, with
+  markdown rendered and its `mermaid` diagrams drawn - in an answer from the
+  session as well as in a file.
 - **Sessions that outlive the browser**, because they live in tmux. A crash
   of `claude` no longer takes the session down with it.
 
