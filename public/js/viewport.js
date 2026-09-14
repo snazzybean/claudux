@@ -162,6 +162,11 @@ export function initViewport() {
         event.touches.length > 1 || // pinch zoom stays
         Boolean(event.target.closest?.('input, textarea')); // text cursor and magnifier
       gestureAxes = free ? FREE : scrollableAxesAt(event.target);
+      // A selection already standing makes the next drag most likely its
+      // handle, and a handle travels sideways through text that scrolls only
+      // vertically - refused, the selection stays at the one word the
+      // long-press found. Just x: the drag this guard exists for is vertical.
+      if (document.getSelection()?.isCollapsed === false) gestureAxes = { ...gestureAxes, x: true };
       gestureOrigin = { x: event.touches[0].clientX, y: event.touches[0].clientY };
     },
     { passive: true },
