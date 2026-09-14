@@ -1,8 +1,12 @@
 // Status deltas from the server. EventSource reconnects on its own - a
 // backgrounded Safari tab loses the connection and picks it up on return,
 // so the dot is briefly stale and then correct.
-export function startEventStream(onStatus, onSubagents) {
+export function startEventStream(onStatus, onSubagents, onReconnected) {
   const source = new EventSource('/api/events');
+  // Every connection, the first one included: the server opens each of them
+  // with its current picture, which makes this the moment anything derived
+  // from earlier deltas stops being trustworthy.
+  if (onReconnected) source.addEventListener('open', () => onReconnected());
   source.addEventListener('status', (event) => {
     try {
       onStatus(JSON.parse(event.data));

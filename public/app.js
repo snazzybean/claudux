@@ -296,14 +296,22 @@ function activityOf(session) {
 // the stream last said.
 function absorbFetchedActivity() {
   const live = new Set();
+  // The counterpart for the subagent edge, gathered in the same pass: the
+  // fetch is the only place that ever reports a session as ended, and the
+  // stream cannot - see forgetEnded() for what that left standing.
+  const ended = new Set();
   for (const project of projects) {
     for (const session of project.sessions) {
-      if (!session.live) continue;
+      if (!session.live) {
+        ended.add(session.id);
+        continue;
+      }
       live.add(session.id);
       if (session.activity) measuredActivity.set(session.id, session.activity);
     }
   }
   for (const id of measuredActivity.keys()) if (!live.has(id)) measuredActivity.delete(id);
+  subagents.forgetEnded(ended);
 }
 
 // Sets the dot of one row without rebuilding the list - the same in-place
@@ -400,6 +408,10 @@ const eventSource = startEventStream(
     // pulse - the delta is the only signal that anything happened.
     agentWindows.noteDelta(payload.sessionId, payload.agents ?? []);
   },
+  // A fresh connection is answered with the server's whole current picture,
+  // so what this side collected before it is not worth keeping - and after a
+  // server restart it is wrong, which nothing else here can find out.
+  () => subagents.reset(),
 );
 
 if (new URLSearchParams(location.search).get('debug') === 'subagents') {

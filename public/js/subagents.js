@@ -49,13 +49,44 @@ export function initSubagents({
     for (const [sessionId, sessionAgents] of known) updateEdge(sessionId, sessionAgents);
   }
 
+  // An ended session cannot be running an agent, and nothing in the stream
+  // ever says so: the watcher skips a tmux session that stopped running, so
+  // the `done` delta for an agent still counted active is never sent - and
+  // this map only ever grew, with refreshEdges() painting that count back
+  // onto the row after every render, for the life of the tab. Same idiom as
+  // the activity dots, which forget an ended session on the same tick.
+  //
+  // Only ids the list actually reported as ended: an id it does not mention
+  // at all belongs to a project whose sessions have not been fetched, and
+  // dropping those would take the count off every row but the open project's.
+  function forgetEnded(endedSessionIds) {
+    for (const sessionId of [...known.keys()]) {
+      if (!endedSessionIds.has(sessionId)) continue;
+      known.delete(sessionId);
+      updateEdge(sessionId, new Map());
+    }
+  }
+
+  // Everything the stream has said so far, dropped so the server's opening
+  // picture can replace it. The one thing that corrects a count frozen by a
+  // RESTART of the server: the watcher comes up with an empty state, sees
+  // the agent already finished, and deliberately sends nothing for a first
+  // sighting that is already done - so a still-running session would wear
+  // the old count until it ends. Reconnecting is where the stream stops
+  // being a series of deltas and starts over.
+  function reset() {
+    const sessionIds = [...known.keys()];
+    known.clear();
+    for (const sessionId of sessionIds) updateEdge(sessionId, new Map());
+  }
+
   // A reader for this module's own state rather than the map itself - the
   // window module needs the list, not the ability to change it.
   function agentsOf(sessionId) {
     return [...(known.get(sessionId)?.values() ?? [])];
   }
 
-  return { handleEvent, refreshEdges, agentsOf };
+  return { handleEvent, refreshEdges, forgetEnded, reset, agentsOf };
 }
 
 // ---------- Diagnostic overlay for the stream itself ----------
