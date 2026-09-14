@@ -622,6 +622,38 @@ test('GET /api/sessions/:id/pane responds with 404 when the session does not exi
   }
 });
 
+// After a /clear the conversation continues under a new ID while the tmux
+// session keeps the old one - the same resolution the end route does. Without
+// it the text view answered 404 for exactly the session that was on screen.
+test('GET /api/sessions/:id/pane resolves a row ID to its carrier', async () => {
+  const { spawnTmux, waitForSession } = await import('../src/lib/tmuxManager.js');
+  const { setMeta } = await import('../src/lib/sessionMeta.js');
+  const config = tmpConfig();
+  const tmuxName = crypto.randomUUID();
+  const rowId = crypto.randomUUID();
+  // An empty target would hit the CURRENT session instead of the intended
+  // one in `tmux -t` - that has already ended a running session here.
+  assert.ok(tmuxName.length > 0, 'session name must not be empty');
+  const server = createApp(config).listen(0);
+  const { port } = server.address();
+  spawnTmux(['new-session', '-d', '-s', tmuxName, 'sleep', '30']);
+  await waitForSession(tmuxName);
+
+  try {
+    setMeta(config.dataDir, rowId, { projectId: 'proj-clear', tmuxSession: tmuxName });
+    assert.equal(await hasSession(rowId), false, 'precondition: nothing runs under the row ID');
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${rowId}/pane`);
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(typeof body.raw, 'string');
+  } finally {
+    server.close();
+    await killSession(tmuxName).catch(() => {});
+  }
+});
+
 test('GET /api/sessions/:id/pane rejects an invalid session ID', async () => {
   const server = createApp(tmpConfig()).listen(0);
   const { port } = server.address();

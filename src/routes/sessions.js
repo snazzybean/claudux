@@ -403,13 +403,18 @@ export function sessionsRouter(config) {
   router.get('/sessions/:id/pane', async (req, res, next) => {
     try {
       if (!isValidSlug(req.params.id)) return res.status(400).json({ error: 'Invalid session ID' });
+      // Via the carrier, for the same reason the end route resolves: after a
+      // /clear the row carries the new Claude ID, and no tmux session runs
+      // under that one. Callers that already hold the carrier pass through
+      // unchanged - resolving a carrier yields itself.
+      const carrier = tmuxSessionFor(config.dataDir, req.params.id);
       // capturePane() returns an empty string instead of throwing for an
       // ended session (see there) - without this check, "session gone"
       // couldn't be told apart from "pane empty".
-      if (!(await hasSession(req.params.id))) {
+      if (!(await hasSession(carrier))) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      const raw = await capturePane(req.params.id);
+      const raw = await capturePane(carrier);
       const clean = sanitizePaneText(raw);
       // Both readings of the pane travel with it: what the session is
       // asking, and whether its input line is empty. They live on the
